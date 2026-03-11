@@ -6,7 +6,11 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 
 function normalizeOrigin(origin: string) {
-  return origin.trim().replace(/\/+$/, '').toLowerCase();
+  return origin
+    .trim()
+    .replace(/^['\"]+|['\"]+$/g, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
 }
 
 async function bootstrap() {
@@ -23,9 +27,8 @@ async function bootstrap() {
 
   const corsOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean)
-    .map(normalizeOrigin);
+    .map(normalizeOrigin)
+    .filter(Boolean);
 
   const defaultOrigins = [
     'http://localhost:5173',
@@ -40,6 +43,11 @@ async function bootstrap() {
   app.enableCors({
     origin: (origin, callback) => {
       if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (allowedOrigins.has('*')) {
         callback(null, true);
         return;
       }
