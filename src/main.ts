@@ -17,8 +17,20 @@ async function bootstrap() {
     prefix: '/uploads/',
   });
 
+  const corsOrigins = (process.env.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://evfleet-frontend-rgke.vercel.app'],
+    origin:
+      corsOrigins.length > 0
+        ? corsOrigins
+        : [
+            'http://localhost:5173',
+            'http://127.0.0.1:5173',
+            'https://evfleet-frontend-rgke.vercel.app',
+          ],
     credentials: true,
   });
 
@@ -30,6 +42,9 @@ async function bootstrap() {
     }),
   );
 
-  await app.listen(3000);
+  const port = Number(process.env.PORT ?? 3000);
+  const host = process.env.HOST ?? '0.0.0.0';
+
+  await app.listen(port, host);
 }
 bootstrap();
