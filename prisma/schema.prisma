@@ -1,0 +1,365 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Branch {
+  id        String   @id @default(uuid())
+  name      String
+  city      String
+  state     String
+  createdAt DateTime @default(now())
+
+  vehicles Vehicle[]
+}
+
+model Vehicle {
+  id            String     @id @default(uuid())
+  plate         String     @unique
+  model         String
+  brand         String
+  year          Int
+  vehicleType   VehicleType @default(LIGHT)
+  category      VehicleCategory @default(CAR)
+  chassis       String?    @unique
+  renavam       String?    @unique
+  acquisitionDate DateTime?
+  fuelType      FuelType?
+  tankCapacity  Float?
+  status        VehicleStatus @default(ACTIVE)
+  photoUrls     String[]   @default([])
+  documentUrls  String[]   @default([])
+  currentKm     Int        @default(0)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  branchId      String
+  branch        Branch     @relation(fields: [branchId], references: [id])
+
+  costCenterId  String?
+  costCenter    CostCenter? @relation(fields: [costCenterId], references: [id])
+
+  drivers            Driver[]
+  maintenanceRecords MaintenanceRecord[]
+  maintenancePlans   MaintenancePlan[]
+  debts              Debt[]
+  fuelRecords        FuelRecord[]
+  trips              Trip[]
+  documents          VehicleDocument[]
+  tires              Tire[]
+  tireReadings       TireReading[]
+  changeLogs         VehicleChangeLog[]
+}
+
+enum VehicleType {
+  LIGHT
+  HEAVY
+}
+
+enum VehicleCategory {
+  CAR
+  TRUCK
+  UTILITY
+}
+
+enum FuelType {
+  GASOLINE
+  ETHANOL
+  DIESEL
+  FLEX
+  ELECTRIC
+  HYBRID
+  CNG
+}
+
+enum VehicleStatus {
+  ACTIVE
+  MAINTENANCE
+  SOLD
+}
+
+model CostCenter {
+  id       String    @id @default(uuid())
+  name     String
+  vehicles Vehicle[]
+}
+
+enum Role {
+  ADMIN
+  FLEET_MANAGER
+  REGIONAL_MANAGER
+  BRANCH_MANAGER
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(BRANCH_MANAGER)
+  createdAt DateTime @default(now())
+
+  auditLogs AuditLog[]
+}
+
+model Driver {
+  id           String   @id @default(uuid())
+  name         String
+  cpf          String   @unique
+  cnh          String   @unique
+  cnhCategory  String
+  cnhExpiresAt DateTime
+  phone        String?
+  status       String
+  createdAt    DateTime @default(now())
+
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  fuelRecords FuelRecord[]
+  trips      Trip[]
+}
+
+model MaintenanceRecord {
+  id              String   @id @default(uuid())
+  type            String
+  description     String
+  partsReplaced   String[] @default([])
+  workshop        String?
+  responsible     String?
+  cost            Float
+  km              Int
+  maintenanceDate DateTime
+  status          String
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+}
+
+model MaintenancePlan {
+  id               String   @id @default(uuid())
+  name             String
+  planType         String
+  intervalUnit     String
+  intervalValue    Int
+  alertBeforeKm    Int?     @default(500)
+  alertBeforeDays  Int?     @default(7)
+  nextDueDate      DateTime?
+  nextDueKm        Int?
+  lastExecutedDate DateTime?
+  active           Boolean  @default(true)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+  @@index([nextDueDate])
+}
+
+model Debt {
+  id          String   @id @default(uuid())
+  description String
+  category    DebtCategory @default(FINE)
+  amount      Float
+  points      Int      @default(0)
+  debtDate    DateTime
+  dueDate     DateTime?
+  referenceMonth String?
+  creditor    String?
+  isRecurring Boolean  @default(false)
+  status      String
+  createdAt   DateTime @default(now())
+
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+}
+
+enum DebtCategory {
+  FINE
+  IPVA
+  LICENSING
+  INSURANCE
+  TOLL
+  TAX
+  OTHER
+}
+
+model FuelRecord {
+  id         String   @id @default(uuid())
+  liters     Float
+  totalValue Float
+  km         Int
+  station    String
+  fuelType   FuelType
+  averageConsumptionKmPerLiter Float?
+  isAnomaly  Boolean  @default(false)
+  anomalyReason String?
+  fuelDate   DateTime
+  createdAt  DateTime @default(now())
+
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
+
+  @@index([vehicleId])
+  @@index([driverId])
+  @@index([isAnomaly])
+}
+
+model VehicleChangeLog {
+  id        String   @id @default(uuid())
+  field     String
+  oldValue  String?
+  newValue  String?
+  changedAt DateTime @default(now())
+
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+  @@index([changedAt])
+}
+
+model AuditLog {
+  id          String   @id
+  action      String
+  entity      String
+  entityId    String?
+  oldData     Json?
+  newData     Json?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  actorUserId String?
+  actorUser   User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+}
+
+model Trip {
+  id           String   @id @default(uuid())
+  origin       String
+  destination  String
+  reason       String?
+  departureKm  Int      @map("kmStart")
+  returnKm     Int?     @map("kmEnd")
+  departureAt  DateTime @map("startedAt")
+  returnAt     DateTime? @map("endedAt")
+  status       String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
+
+  @@index([vehicleId])
+  @@index([driverId])
+  @@index([departureAt])
+  @@map("TripUsage")
+}
+
+model VehicleDocument {
+  id          String   @id @default(uuid())
+  type        DocumentType
+  name        String   @map("title")
+  number      String?  @map("documentNumber")
+  issueDate   DateTime?
+  expiryDate  DateTime?
+  status      String
+  issuer      String?  @map("provider")
+  notes       String?
+  fileUrl     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  vehicleId String
+  vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
+  @@index([expiryDate])
+}
+
+model Tire {
+  id                   String     @id @default(uuid())
+  serialNumber         String     @unique
+  brand                String
+  model                String
+  size                 String
+  purchaseDate         DateTime?
+  purchaseCost         Float?
+  status               TireStatus @default(IN_STOCK)
+  axlePosition         String?
+  wheelPosition        String?
+  currentKm            Int        @default(0)
+  currentTreadDepthMm  Float?
+  currentPressurePsi   Float?
+  targetPressurePsi    Float?
+  minTreadDepthMm      Float      @default(3)
+  installedAt          DateTime?
+  notes                String?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+
+  readings TireReading[]
+
+  @@index([vehicleId])
+  @@index([status])
+}
+
+model TireReading {
+  id            String   @id @default(uuid())
+  readingDate   DateTime
+  km            Int
+  treadDepthMm  Float
+  pressurePsi   Float
+  condition     String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  tireId String
+  tire   Tire    @relation(fields: [tireId], references: [id], onDelete: Cascade)
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+
+  @@index([tireId])
+  @@index([vehicleId])
+  @@index([readingDate])
+}
+
+enum TireStatus {
+  IN_STOCK
+  INSTALLED
+  MAINTENANCE
+  RETREADED
+  SCRAPPED
+}
+
+enum DocumentType {
+  LICENSING
+  INSURANCE
+  IPVA
+  LEASING_CONTRACT
+  INSPECTION
+  OTHER
+}
