@@ -19,6 +19,7 @@ import { MaintenancePlansModule } from './maintenance-plans/maintenance-plans.mo
 import { TripsModule } from './trips/trips.module';
 import { VehicleDocumentsModule } from './vehicle-documents/vehicle-documents.module';
 import { TiresModule } from './tires/tires.module';
+import { MenuVisibilityModule } from './menu-visibility/menu-visibility.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { TiresModule } from './tires/tires.module';
     TripsModule,
     VehicleDocumentsModule,
     TiresModule,
+    MenuVisibilityModule,
     ConfigModule.forRoot({ isGlobal: true }),
   ],
   controllers: [AppController],
