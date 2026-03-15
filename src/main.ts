@@ -15,6 +15,7 @@ function normalizeOrigin(origin: string) {
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.enableShutdownHooks();
   const uploadsPath = join(process.cwd(), 'uploads');
 
   if (!existsSync(uploadsPath)) {
