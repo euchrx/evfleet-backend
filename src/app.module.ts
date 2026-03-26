@@ -20,6 +20,7 @@ import { TripsModule } from './trips/trips.module';
 import { VehicleDocumentsModule } from './vehicle-documents/vehicle-documents.module';
 import { TiresModule } from './tires/tires.module';
 import { MenuVisibilityModule } from './menu-visibility/menu-visibility.module';
+import { SystemResetModule } from './system-reset/system-reset.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { MenuVisibilityModule } from './menu-visibility/menu-visibility.module';
     VehicleDocumentsModule,
     TiresModule,
     MenuVisibilityModule,
+    SystemResetModule,
     ConfigModule.forRoot({ isGlobal: true }),
   ],
   controllers: [AppController],
