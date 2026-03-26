@@ -26,6 +26,18 @@ export class SystemResetService {
           ) {
             return { count: 0 };
           }
+
+          if (error instanceof Prisma.PrismaClientUnknownRequestError) {
+            const message = String(error.message || '').toLowerCase();
+            const missingRelation =
+              message.includes('does not exist') ||
+              message.includes('relation') ||
+              message.includes('table');
+            if (missingRelation) {
+              return { count: 0 };
+            }
+          }
+
           throw error;
         }
       };
