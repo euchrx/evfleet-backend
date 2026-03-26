@@ -38,9 +38,7 @@ async function bootstrap() {
     'https://evfleet-frontend-production.up.railway.app',
   ].map(normalizeOrigin);
 
-  const allowedOrigins = new Set(
-    corsOrigins.length > 0 ? corsOrigins : defaultOrigins,
-  );
+  const allowedOrigins = new Set([...defaultOrigins, ...corsOrigins]);
 
   const corsOriginPatterns = (
     process.env.CORS_ORIGIN_PATTERNS ??
@@ -71,10 +69,16 @@ async function bootstrap() {
       }
 
       const incomingOrigin = normalizeOrigin(origin);
+      const isKnownHost =
+        incomingOrigin.endsWith('.vercel.app') ||
+        incomingOrigin.endsWith('.railway.app');
       const matchesPattern = corsOriginPatterns.some((pattern) =>
         pattern.test(incomingOrigin),
       );
-      callback(null, allowedOrigins.has(incomingOrigin) || matchesPattern);
+      callback(
+        null,
+        allowedOrigins.has(incomingOrigin) || matchesPattern || isKnownHost,
+      );
     },
     credentials: true,
   });
