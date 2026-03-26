@@ -1,4 +1,5 @@
 import { Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -15,6 +16,20 @@ export class SystemResetService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      const safeDeleteMany = async (operation: () => Promise<{ count: number }>) => {
+        try {
+          return await operation();
+        } catch (error) {
+          if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2021'
+          ) {
+            return { count: 0 };
+          }
+          throw error;
+        }
+      };
+
       const tireReadings = await tx.tireReading.deleteMany();
       const fuelRecords = await tx.fuelRecord.deleteMany();
       const maintenanceRecords = await tx.maintenanceRecord.deleteMany();
@@ -28,8 +43,8 @@ export class SystemResetService {
       const vehicles = await tx.vehicle.deleteMany();
       const branches = await tx.branch.deleteMany();
       const costCenters = await tx.costCenter.deleteMany();
-      const systemSettings = await tx.systemSetting.deleteMany();
-      const auditLogs = await tx.auditLog.deleteMany();
+      const systemSettings = await safeDeleteMany(() => tx.systemSetting.deleteMany());
+      const auditLogs = await safeDeleteMany(() => tx.auditLog.deleteMany());
 
       return {
         tireReadings: tireReadings.count,
