@@ -173,6 +173,20 @@ export class VehiclesService {
       });
     } catch (error: any) {
       if (error?.code === 'P2002') {
+        const target = Array.isArray(error?.meta?.target)
+          ? String(error.meta.target[0] || '')
+          : String(error?.meta?.target || '');
+
+        if (/plate/i.test(target)) {
+          throw new BadRequestException('Ja existe veiculo com placa informada.');
+        }
+        if (/chassis/i.test(target)) {
+          throw new BadRequestException('Ja existe veiculo com chassi informado.');
+        }
+        if (/renavam/i.test(target)) {
+          throw new BadRequestException('Ja existe veiculo com renavam informado.');
+        }
+
         throw new BadRequestException(
           'Nao foi possivel salvar: placa, chassi ou renavam ja cadastrado.',
         );
@@ -371,6 +385,20 @@ export class VehiclesService {
       });
     } catch (error: any) {
       if (error?.code === 'P2002') {
+        const target = Array.isArray(error?.meta?.target)
+          ? String(error.meta.target[0] || '')
+          : String(error?.meta?.target || '');
+
+        if (/plate/i.test(target)) {
+          throw new BadRequestException('Ja existe veiculo com placa informada.');
+        }
+        if (/chassis/i.test(target)) {
+          throw new BadRequestException('Ja existe veiculo com chassi informado.');
+        }
+        if (/renavam/i.test(target)) {
+          throw new BadRequestException('Ja existe veiculo com renavam informado.');
+        }
+
         throw new BadRequestException(
           'Nao foi possivel salvar: placa, chassi ou renavam ja cadastrado.',
         );
