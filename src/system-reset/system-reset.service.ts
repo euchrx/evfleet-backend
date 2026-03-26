@@ -1,11 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class SystemResetService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async resetAllDatabase() {
+  async resetAllDatabase(jwtSecretToken: string) {
+    const configuredSecret = String(process.env.JWT_SECRET || '').trim();
+    if (!configuredSecret) {
+      throw new InternalServerErrorException('JWT_SECRET não configurado no servidor.');
+    }
+    if (String(jwtSecretToken || '').trim() !== configuredSecret) {
+      throw new UnauthorizedException('Token JWT_SECRET inválido para executar reset.');
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
       const tireReadings = await tx.tireReading.deleteMany();
       const fuelRecords = await tx.fuelRecord.deleteMany();
@@ -49,4 +57,3 @@ export class SystemResetService {
     };
   }
 }
-

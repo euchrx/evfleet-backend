@@ -35,11 +35,28 @@ async function bootstrap() {
     'http://localhost:5173',
     'http://127.0.0.1:5173',
     'https://evfleet-frontend-rgke.vercel.app',
+    'https://evfleet-frontend-production.up.railway.app',
   ].map(normalizeOrigin);
 
   const allowedOrigins = new Set(
     corsOrigins.length > 0 ? corsOrigins : defaultOrigins,
   );
+
+  const corsOriginPatterns = (
+    process.env.CORS_ORIGIN_PATTERNS ??
+    '^https://.*\\.vercel\\.app$,^https://.*\\.railway\\.app$'
+  )
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .map((value) => {
+      try {
+        return new RegExp(value, 'i');
+      } catch {
+        return null;
+      }
+    })
+    .filter((value): value is RegExp => value !== null);
 
   app.enableCors({
     origin: (origin, callback) => {
@@ -54,7 +71,10 @@ async function bootstrap() {
       }
 
       const incomingOrigin = normalizeOrigin(origin);
-      callback(null, allowedOrigins.has(incomingOrigin));
+      const matchesPattern = corsOriginPatterns.some((pattern) =>
+        pattern.test(incomingOrigin),
+      );
+      callback(null, allowedOrigins.has(incomingOrigin) || matchesPattern);
     },
     credentials: true,
   });
