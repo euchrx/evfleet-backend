@@ -60,6 +60,22 @@ model Vehicle {
   tires              Tire[]
   tireReadings       TireReading[]
   changeLogs         VehicleChangeLog[]
+  profilePhoto       VehicleProfilePhoto?
+}
+
+model VehicleProfilePhoto {
+  id         String   @id @default(uuid())
+  filename   String
+  mimeType   String
+  size       Int
+  data       Bytes
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  vehicleId  String   @unique
+  vehicle    Vehicle  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId])
 }
 
 enum VehicleType {

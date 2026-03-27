@@ -17,6 +17,15 @@ type ChangeItem = {
 export class VehiclesService {
   constructor(private prisma: PrismaService) {}
 
+  private withProfilePhotoUrl<T extends { id: string; profilePhoto?: { id: string } | null }>(
+    vehicle: T,
+  ) {
+    return {
+      ...vehicle,
+      profilePhotoUrl: vehicle.profilePhoto ? `/vehicles/${vehicle.id}/profile-photo` : null,
+    };
+  }
+
   private normalizeText(value: string | null | undefined) {
     if (value === undefined || value === null) return null;
     const trimmed = value.trim();
@@ -151,7 +160,7 @@ export class VehiclesService {
     await this.ensureUniqueVehicleFields({ plate, chassis, renavam });
 
     try {
-      return await this.prisma.vehicle.create({
+      const vehicle = await this.prisma.vehicle.create({
         data: {
           plate,
           model: dto.model,
@@ -169,8 +178,9 @@ export class VehiclesService {
           documentUrls: dto.documentUrls ?? [],
           branch: { connect: { id: dto.branchId } },
         },
-        include: { branch: true, costCenter: true },
+        include: { branch: true, costCenter: true, profilePhoto: { select: { id: true } } },
       });
+      return this.withProfilePhotoUrl(vehicle);
     } catch (error: any) {
       if (error?.code === 'P2002') {
         const target = Array.isArray(error?.meta?.target)
@@ -218,7 +228,7 @@ export class VehiclesService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { branch: true, costCenter: true },
+        include: { branch: true, costCenter: true, profilePhoto: { select: { id: true } } },
       }),
     ]);
 
@@ -227,18 +237,18 @@ export class VehiclesService {
       limit,
       total,
       totalPages: Math.ceil(total / limit),
-      items,
+      items: items.map((item) => this.withProfilePhotoUrl(item)),
     };
   }
 
   async findOne(id: string) {
     const vehicle = await this.prisma.vehicle.findUnique({
       where: { id },
-      include: { branch: true, costCenter: true },
+      include: { branch: true, costCenter: true, profilePhoto: { select: { id: true } } },
     });
 
     if (!vehicle) throw new NotFoundException('Vehicle nao encontrado');
-    return vehicle;
+    return this.withProfilePhotoUrl(vehicle);
   }
 
   async getHistory(id: string, page = 1, limit = 10) {
@@ -367,7 +377,7 @@ export class VehiclesService {
               : {}),
             ...(branchId ? { branch: { connect: { id: branchId } } } : {}),
           },
-          include: { branch: true, costCenter: true },
+          include: { branch: true, costCenter: true, profilePhoto: { select: { id: true } } },
         });
 
         if (changes.length > 0) {
@@ -381,7 +391,7 @@ export class VehiclesService {
           });
         }
 
-        return updated;
+        return this.withProfilePhotoUrl(updated);
       });
     } catch (error: any) {
       if (error?.code === 'P2002') {
@@ -411,5 +421,49 @@ export class VehiclesService {
     await this.findOne(id);
     await this.prisma.vehicle.delete({ where: { id } });
     return { message: 'Vehicle removido com sucesso' };
+  }
+
+  async uploadProfilePhoto(vehicleId: string, file: {
+    originalname: string;
+    mimetype: string;
+    size: number;
+    buffer: Buffer;
+  }) {
+    const vehicle = await this.prisma.vehicle.findUnique({
+      where: { id: vehicleId },
+      select: { id: true },
+    });
+    if (!vehicle) throw new NotFoundException('Vehicle nao encontrado');
+
+    await this.prisma.vehicleProfilePhoto.upsert({
+      where: { vehicleId },
+      update: {
+        filename: file.originalname || 'vehicle-profile-photo',
+        mimeType: file.mimetype || 'application/octet-stream',
+        size: file.size || 0,
+        data: file.buffer,
+      },
+      create: {
+        vehicleId,
+        filename: file.originalname || 'vehicle-profile-photo',
+        mimeType: file.mimetype || 'application/octet-stream',
+        size: file.size || 0,
+        data: file.buffer,
+      },
+    });
+
+    return {
+      vehicleId,
+      profilePhotoUrl: `/vehicles/${vehicleId}/profile-photo`,
+    };
+  }
+
+  async getProfilePhoto(vehicleId: string) {
+    const photo = await this.prisma.vehicleProfilePhoto.findUnique({
+      where: { vehicleId },
+      select: { mimeType: true, filename: true, data: true },
+    });
+    if (!photo) throw new NotFoundException('Foto de perfil nao encontrada');
+    return photo;
   }
 }

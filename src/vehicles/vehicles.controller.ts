@@ -8,6 +8,8 @@ import {
   Patch,
   Post,
   Query,
+  Res,
+  UploadedFile,
   UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
@@ -16,9 +18,12 @@ import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import { Roles } from '../auth/roles.decorator';
 import { FilesInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import type { Response } from 'express';
 
 type UploadKind = 'photo' | 'document';
 
@@ -72,6 +77,40 @@ export class VehiclesController {
     });
 
     return { urls };
+  }
+
+  @Roles('ADMIN', 'FLEET_MANAGER')
+  @Post(':id/profile-photo')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 8 * 1024 * 1024 },
+      fileFilter: (_, file, cb) => {
+        const allowed = /^(image\/jpeg|image\/jpg|image\/png|image\/webp)$/i.test(
+          file.mimetype || '',
+        );
+        if (!allowed) {
+          return cb(
+            new BadRequestException('Formato de foto invalido. Use JPG, PNG ou WEBP.'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  uploadProfilePhoto(@Param('id') id: string, @UploadedFile() file?: any) {
+    if (!file) throw new BadRequestException('Nenhum arquivo enviado.');
+    return this.service.uploadProfilePhoto(id, file);
+  }
+
+  @Get(':id/profile-photo')
+  async getProfilePhoto(@Param('id') id: string, @Res() res: Response) {
+    const photo = await this.service.getProfilePhoto(id);
+    res.setHeader('Content-Type', photo.mimeType || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('Content-Disposition', `inline; filename="${photo.filename || 'vehicle-profile'}"`);
+    res.send(photo.data);
   }
 
   @Roles('ADMIN', 'FLEET_MANAGER')
