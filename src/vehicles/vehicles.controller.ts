@@ -17,6 +17,7 @@ import { VehiclesService } from './vehicles.service';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
 import { Roles } from '../auth/roles.decorator';
+import { Public } from '../auth/public.decorator';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -104,6 +105,7 @@ export class VehiclesController {
     return this.service.uploadProfilePhoto(id, file);
   }
 
+  @Public()
   @Get(':id/profile-photo')
   async getProfilePhoto(@Param('id') id: string, @Res() res: Response) {
     const photo = await this.service.getProfilePhoto(id);
