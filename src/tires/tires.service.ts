@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTireDto } from './dto/create-tire.dto';
 import { UpdateTireDto } from './dto/update-tire.dto';
@@ -22,29 +24,32 @@ export class TiresService {
 
   async create(dto: CreateTireDto) {
     if (dto.vehicleId) await this.ensureVehicleExists(dto.vehicleId);
-
-    return (this.prisma as any).tire.create({
-      data: {
-        serialNumber: dto.serialNumber.trim().toUpperCase(),
-        brand: dto.brand.trim(),
-        model: dto.model.trim(),
-        size: dto.size.trim(),
-        ...(dto.purchaseDate !== undefined ? { purchaseDate: new Date(dto.purchaseDate) } : {}),
-        ...(dto.purchaseCost !== undefined ? { purchaseCost: dto.purchaseCost } : {}),
-        ...(dto.status !== undefined ? { status: dto.status } : {}),
-        ...(dto.axlePosition !== undefined ? { axlePosition: dto.axlePosition } : {}),
-        ...(dto.wheelPosition !== undefined ? { wheelPosition: dto.wheelPosition } : {}),
-        ...(dto.currentKm !== undefined ? { currentKm: Math.round(dto.currentKm) } : {}),
-        ...(dto.currentTreadDepthMm !== undefined ? { currentTreadDepthMm: dto.currentTreadDepthMm } : {}),
-        ...(dto.currentPressurePsi !== undefined ? { currentPressurePsi: dto.currentPressurePsi } : {}),
-        ...(dto.targetPressurePsi !== undefined ? { targetPressurePsi: dto.targetPressurePsi } : {}),
-        ...(dto.minTreadDepthMm !== undefined ? { minTreadDepthMm: dto.minTreadDepthMm } : {}),
-        ...(dto.installedAt !== undefined ? { installedAt: new Date(dto.installedAt) } : {}),
-        ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
-        ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
-      },
-      include: this.includeVehicle,
-    });
+    try {
+      return await (this.prisma as any).tire.create({
+        data: {
+          serialNumber: dto.serialNumber.trim().toUpperCase(),
+          brand: dto.brand.trim(),
+          model: dto.model.trim(),
+          size: dto.size.trim(),
+          ...(dto.purchaseDate !== undefined ? { purchaseDate: new Date(dto.purchaseDate) } : {}),
+          ...(dto.purchaseCost !== undefined ? { purchaseCost: dto.purchaseCost } : {}),
+          ...(dto.status !== undefined ? { status: dto.status } : {}),
+          ...(dto.axlePosition !== undefined ? { axlePosition: dto.axlePosition } : {}),
+          ...(dto.wheelPosition !== undefined ? { wheelPosition: dto.wheelPosition } : {}),
+          ...(dto.currentKm !== undefined ? { currentKm: Math.round(dto.currentKm) } : {}),
+          ...(dto.currentTreadDepthMm !== undefined ? { currentTreadDepthMm: dto.currentTreadDepthMm } : {}),
+          ...(dto.currentPressurePsi !== undefined ? { currentPressurePsi: dto.currentPressurePsi } : {}),
+          ...(dto.targetPressurePsi !== undefined ? { targetPressurePsi: dto.targetPressurePsi } : {}),
+          ...(dto.minTreadDepthMm !== undefined ? { minTreadDepthMm: dto.minTreadDepthMm } : {}),
+          ...(dto.installedAt !== undefined ? { installedAt: new Date(dto.installedAt) } : {}),
+          ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
+          ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
+        },
+        include: this.includeVehicle,
+      });
+    } catch (error) {
+      this.handlePrismaError(error);
+    }
   }
 
   async findAll() {
@@ -204,5 +209,22 @@ export class TiresService {
       select: { id: true },
     });
     if (!exists) throw new NotFoundException('Veiculo nao encontrado');
+  }
+
+  private handlePrismaError(error: unknown): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        throw new BadRequestException('Ja existe um pneu com este numero de serie/DOT-TIN.');
+      }
+      if (error.code === 'P2003') {
+        throw new BadRequestException('Nao foi possivel vincular o pneu ao veiculo informado.');
+      }
+      if (error.code === 'P2022') {
+        throw new InternalServerErrorException(
+          'Banco de dados desatualizado para pneus. Execute as migracoes do backend.',
+        );
+      }
+    }
+    throw error;
   }
 }
