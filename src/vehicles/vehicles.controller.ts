@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   Res,
   UploadedFile,
   UploadedFiles,
@@ -117,8 +118,12 @@ export class VehiclesController {
 
   @Roles('ADMIN', 'FLEET_MANAGER')
   @Post()
-  create(@Body() dto: CreateVehicleDto) {
-    return this.service.create(dto);
+  create(@Body() dto: CreateVehicleDto, @Req() req: any) {
+    return this.service.create(dto, {
+      role: req?.user?.role,
+      userCompanyId: req?.user?.companyId,
+      scopeCompanyId: req?.companyScopeId,
+    });
   }
 
   @Get()

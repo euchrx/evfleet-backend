@@ -17,6 +17,50 @@ type ChangeItem = {
 export class VehiclesService {
   constructor(private prisma: PrismaService) {}
 
+  private async resolveBranchIdForCreate(
+    inputBranchId: string | undefined,
+    context?: { role?: string; userCompanyId?: string; scopeCompanyId?: string },
+  ) {
+    const branchId = String(inputBranchId || '').trim();
+    if (branchId) {
+      const branchExists = await this.prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { id: true },
+      });
+      if (!branchExists) throw new NotFoundException('Branch nao encontrada');
+      return branchExists.id;
+    }
+
+    const role = String(context?.role || '').trim().toUpperCase();
+    const companyId =
+      role === 'ADMIN'
+        ? String(context?.scopeCompanyId || '').trim()
+        : String(context?.userCompanyId || '').trim();
+
+    if (!companyId) {
+      if (role === 'ADMIN') {
+        throw new BadRequestException(
+          'ADMIN sem escopo de empresa. Selecione uma empresa no escopo para continuar.',
+        );
+      }
+      throw new BadRequestException('Usuario sem companyId vinculado.');
+    }
+
+    const firstBranch = await this.prisma.branch.findFirst({
+      where: { companyId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+
+    if (!firstBranch) {
+      throw new BadRequestException(
+        'Empresa sem estabelecimento operacional vinculado.',
+      );
+    }
+
+    return firstBranch.id;
+  }
+
   private withProfilePhotoUrl<T extends { id: string; profilePhoto?: { id: string } | null }>(
     vehicle: T,
   ) {
@@ -145,13 +189,11 @@ export class VehiclesService {
       .filter((change) => change.oldValue !== change.newValue);
   }
 
-  async create(dto: CreateVehicleDto) {
-    const branchExists = await this.prisma.branch.findUnique({
-      where: { id: dto.branchId },
-      select: { id: true },
-    });
-
-    if (!branchExists) throw new NotFoundException('Branch nao encontrada');
+  async create(
+    dto: CreateVehicleDto,
+    context?: { role?: string; userCompanyId?: string; scopeCompanyId?: string },
+  ) {
+    const resolvedBranchId = await this.resolveBranchIdForCreate(dto.branchId, context);
 
     const plate = this.normalizeText(dto.plate)?.toUpperCase() || '';
     const chassis = this.normalizeText(dto.chassis)?.toUpperCase() || null;
@@ -176,7 +218,7 @@ export class VehiclesService {
           status: dto.status ?? 'ACTIVE',
           photoUrls: dto.photoUrls ?? [],
           documentUrls: dto.documentUrls ?? [],
-          branch: { connect: { id: dto.branchId } },
+          branch: { connect: { id: resolvedBranchId } },
         },
         include: { branch: true, costCenter: true, profilePhoto: { select: { id: true } } },
       });

@@ -95,6 +95,7 @@ export class CreateVehicleDto {
   @IsUrl({}, { each: true })
   documentUrls?: string[];
 
+  @IsOptional()
   @IsUUID()
   branchId: string;
 }
