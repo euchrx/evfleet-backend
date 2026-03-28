@@ -218,6 +218,28 @@ describe('Billing Multiempresa (e2e)', () => {
       .set('x-role', 'ADMIN')
       .set('x-company-id', 'company_1')
       .expect(200);
+
+    await request(app.getHttpServer())
+      .get('/billing/me/subscription')
+      .set('x-role', 'FLEET_MANAGER')
+      .set('x-company-id', 'company_1')
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get('/billing/me/payments')
+      .set('x-role', 'FLEET_MANAGER')
+      .set('x-company-id', 'company_1')
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/billing/me/pay')
+      .set('x-role', 'FLEET_MANAGER')
+      .set('x-company-id', 'company_1')
+      .send({})
+      .expect(201)
+      .expect((res) => {
+        expect(res.body.checkoutUrl).toBeTruthy();
+      });
   });
 
   it('rejeita webhook sem assinatura ou com assinatura invalida', async () => {

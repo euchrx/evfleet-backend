@@ -1,4 +1,15 @@
-import { Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, Req } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import { Roles } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
 import { AllowInadimplenteAccess } from '../auth/allow-inadimplente-access.decorator';
@@ -25,6 +36,24 @@ export class BillingController {
   @Get('plans')
   async getPlans() {
     return this.billingService.listPlans();
+  }
+
+  @Get('me/subscription')
+  async getMySubscription(@Req() req: any) {
+    const companyId = this.requireAuthenticatedCompanyId(req);
+    return this.billingService.getCompanySubscription(companyId);
+  }
+
+  @Get('me/payments')
+  async getMyPayments(@Req() req: any) {
+    const companyId = this.requireAuthenticatedCompanyId(req);
+    return this.billingService.getCompanyPayments(companyId);
+  }
+
+  @Post('me/pay')
+  async payMyCompany(@Req() req: any) {
+    const companyId = this.requireAuthenticatedCompanyId(req);
+    return this.billingService.createInitialPaymentForCompany(companyId);
   }
 
   @Roles('ADMIN')
@@ -112,5 +141,15 @@ export class BillingController {
     if (authenticatedCompanyId && authenticatedCompanyId !== companyId) {
       throw new ForbiddenException('Acesso negado para dados de outra empresa.');
     }
+  }
+
+  private requireAuthenticatedCompanyId(req: any): string {
+    const companyId = (req?.user?.companyId as string | undefined)?.trim();
+    if (!companyId) {
+      throw new BadRequestException(
+        'Usuário autenticado sem companyId. Vincule o usuário a uma empresa.',
+      );
+    }
+    return companyId;
   }
 }

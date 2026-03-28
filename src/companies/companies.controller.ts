@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -25,7 +26,13 @@ export class CompaniesController {
 
   @Get('me')
   findCurrent(@Req() req: any) {
-    return this.companiesService.findOne(req.user.companyId);
+    const companyId = (req?.user?.companyId as string | undefined)?.trim();
+    if (!companyId) {
+      throw new BadRequestException(
+        'Usuário autenticado sem companyId. Vincule o usuário a uma empresa.',
+      );
+    }
+    return this.companiesService.findOne(companyId);
   }
 
   @Get(':id')

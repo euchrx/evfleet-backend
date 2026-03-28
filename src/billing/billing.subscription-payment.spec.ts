@@ -86,6 +86,29 @@ describe('BillingService Subscription + Payment', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('gera pagamento inicial pelo companyId (autoatendimento)', async () => {
+    const { service, gateway } = createService();
+    const subscription = await service.createSubscriptionForCompany('company_1', 'plan_1');
+    gateway.createCheckoutLink.mockResolvedValue({
+      gatewayReference: 'gw_me_1',
+      checkoutUrl: 'https://checkout.local/me-1',
+      rawResponse: { id: 'gw_me_1' },
+    });
+
+    const result = await service.createInitialPaymentForCompany('company_1');
+
+    expect(result.subscriptionId).toBe(subscription.id);
+    expect(result.checkoutUrl).toBe('https://checkout.local/me-1');
+  });
+
+  it('falha no autoatendimento quando empresa nao possui assinatura', async () => {
+    const { service } = createService();
+
+    await expect(service.createInitialPaymentForCompany('company_sem_sub')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
   it('falha ao gerar payment quando valor do plano e menor que o minimo', async () => {
     const { prisma } = createInMemoryBillingPrisma({
       companies: [{ id: 'company_1', name: 'Empresa 1', active: true }],

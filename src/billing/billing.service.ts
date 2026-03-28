@@ -404,6 +404,24 @@ export class BillingService {
     }
   }
 
+  async createInitialPaymentForCompany(companyId: string) {
+    if (!companyId?.trim()) {
+      throw new BadRequestException('companyId do usuário autenticado não informado.');
+    }
+
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { companyId },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      select: { id: true },
+    });
+
+    if (!subscription) {
+      throw new NotFoundException('Nenhuma assinatura encontrada para a empresa autenticada.');
+    }
+
+    return this.createInitialPaymentForSubscription(subscription.id, companyId);
+  }
+
   async handleInfinitePayWebhook(payload: unknown, headers?: Record<string, string | string[]>) {
     const normalized = this.normalizeInfinitePayWebhookPayload(payload, headers);
     const companyIdForEvent = await this.resolveWebhookCompanyId(normalized);
