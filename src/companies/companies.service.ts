@@ -26,21 +26,34 @@ export class CompaniesService {
     }
 
     try {
-      return await this.prisma.company.create({
-        data: {
-          name: normalizedName,
-          document: normalizedDocument || null,
-          slug: normalizedSlug || null,
-          active: true,
-        },
-        select: {
-          id: true,
-          name: true,
-          document: true,
-          slug: true,
-          active: true,
-          createdAt: true,
-        },
+      return await this.prisma.$transaction(async (tx) => {
+        const createdCompany = await tx.company.create({
+          data: {
+            name: normalizedName,
+            document: normalizedDocument || null,
+            slug: normalizedSlug || null,
+            active: true,
+          },
+          select: {
+            id: true,
+            name: true,
+            document: true,
+            slug: true,
+            active: true,
+            createdAt: true,
+          },
+        });
+
+        await tx.branch.create({
+          data: {
+            name: normalizedName,
+            city: 'Nao informado',
+            state: 'NI',
+            companyId: createdCompany.id,
+          },
+        });
+
+        return createdCompany;
       });
     } catch (error) {
       if (
