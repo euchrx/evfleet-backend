@@ -14,7 +14,8 @@ export class BillingWebhookSignatureService {
     headers: Record<string, string | string[] | undefined>,
     rawBody: Buffer,
   ) {
-    if (this.isValidationDisabled()) {
+    const validationDisabled = this.isValidationDisabled();
+    if (validationDisabled) {
       console.warn(
         '[BillingWebhookSignatureService] Validacao de assinatura desabilitada por INFINITEPAY_DISABLE_WEBHOOK_SIGNATURE=true',
       );
@@ -23,6 +24,10 @@ export class BillingWebhookSignatureService {
 
     const secret = this.getWebhookSecret();
     const headerName = this.getSignatureHeaderName();
+    this.logDebug('[BillingWebhookSignatureService] Validacao de assinatura habilitada', {
+      headerName,
+      hasRawBody: rawBody.length > 0,
+    });
     const incomingSignature = this.readHeader(headers, headerName);
 
     if (!incomingSignature) {
@@ -96,5 +101,16 @@ export class BillingWebhookSignatureService {
       return trimmed.slice('sha256='.length);
     }
     return trimmed;
+  }
+
+  private logDebug(message: string, payload?: unknown) {
+    const enabled = String(process.env.INFINITEPAY_WEBHOOK_DEBUG || '').trim().toLowerCase();
+    const shouldLog = enabled === '1' || enabled === 'true' || enabled === 'yes' || enabled === 'on';
+    if (!shouldLog) return;
+    if (payload === undefined) {
+      console.log(message);
+      return;
+    }
+    console.log(message, payload);
   }
 }

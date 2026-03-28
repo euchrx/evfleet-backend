@@ -26,6 +26,8 @@ type InfinitePayWebhookNormalized = {
   dedupKey: string;
   eventType: string;
   paymentStatus: string;
+  amount?: number;
+  paidAmount?: number;
   orderNsu?: string;
   transactionNsu?: string;
   invoiceSlug?: string;
@@ -669,7 +671,7 @@ export class BillingService {
       throw new ForbiddenException('Acesso negado para pagamento de outra empresa.');
     }
 
-    if (!this.isPaymentConfirmedStatus(normalized.paymentStatus)) {
+    if (!this.isWebhookPaymentConfirmed(normalized)) {
       return {
         confirmed: false,
         paymentId: payment.id,
@@ -841,6 +843,8 @@ export class BillingService {
       dedupKey: normalized.dedupKey,
       eventType: normalized.eventType,
       paymentStatus: normalized.paymentStatus,
+      amount: normalized.amount,
+      paidAmount: normalized.paidAmount,
       orderNsu: normalized.orderNsu,
       transactionNsu: normalized.transactionNsu,
       invoiceSlug: normalized.invoiceSlug,
@@ -880,12 +884,7 @@ export class BillingService {
       throw error;
     }
 
-    let paymentStatus = normalized.paymentStatus;
-    if (
-      !this.isPaymentConfirmedStatus(paymentStatus) &&
-      normalized.paymentCheckEnabled &&
-      normalized.orderNsu
-    ) {
+    if (!this.isWebhookPaymentConfirmed(normalized) && normalized.paymentCheckEnabled && normalized.orderNsu) {
       this.logWebhook(
         '[InfinitePay webhook] payment_check habilitado consultando order_nsu',
         normalized.orderNsu,
@@ -896,11 +895,18 @@ export class BillingService {
       const paymentCheckStatus = this.extractPaymentCheckStatus(paymentCheckPayload);
       if (paymentCheckStatus) {
         this.logWebhook('[InfinitePay webhook] payment_check status', paymentCheckStatus);
-        paymentStatus = paymentCheckStatus;
+        normalized.paymentStatus = paymentCheckStatus;
       }
+      const normalizedFromPaymentCheck = this.normalizeInfinitePayWebhookPayload(paymentCheckPayload || {});
+      normalized.amount = normalized.amount ?? normalizedFromPaymentCheck.amount;
+      normalized.paidAmount = normalized.paidAmount ?? normalizedFromPaymentCheck.paidAmount;
+      normalized.receiptUrl = normalized.receiptUrl || normalizedFromPaymentCheck.receiptUrl;
+      normalized.transactionNsu =
+        normalized.transactionNsu || normalizedFromPaymentCheck.transactionNsu;
+      normalized.invoiceSlug = normalized.invoiceSlug || normalizedFromPaymentCheck.invoiceSlug;
     }
 
-    if (!this.isPaymentConfirmedStatus(paymentStatus)) {
+    if (!this.isWebhookPaymentConfirmed(normalized)) {
       await this.prisma.webhookEvent.update({
         where: { id: webhookEvent.id },
         data: {
@@ -1007,6 +1013,27 @@ export class BillingService {
         ...result,
       };
     } catch (error) {
+      if (error instanceof NotFoundException) {
+        this.logWebhook(
+          '[InfinitePay webhook] pagamento nao encontrado durante conciliacao',
+          this.getErrorMessage(error),
+          true,
+        );
+        await this.prisma.webhookEvent.update({
+          where: { id: webhookEvent.id },
+          data: {
+            processStatus: WebhookProcessStatus.PROCESSED,
+            processedAt: new Date(),
+            errorMessage: this.getErrorMessage(error),
+            ...(companyIdForEvent ? { companyId: companyIdForEvent } : {}),
+          },
+        });
+        return {
+          duplicate: false,
+          processed: true,
+          message: 'Webhook recebido com sucesso, aguardando conciliacao do pagamento.',
+        };
+      }
       this.logWebhook('[InfinitePay webhook] falha no processamento', this.getErrorMessage(error), true);
       await this.prisma.webhookEvent.update({
         where: { id: webhookEvent.id },
@@ -1055,6 +1082,22 @@ export class BillingService {
       this.readString(this.asObject(body.payment_check).status) ||
       (paidBoolean ? 'PAID' : '') ||
       '';
+
+    const amount = this.readNumber(
+      body.amount ??
+        this.asObject(body.data).amount ??
+        this.asObject(body.payment).amount ??
+        this.asObject(body.payment_check).amount,
+    );
+    const paidAmount = this.readNumber(
+      body.paid_amount ??
+        body.paidAmount ??
+        this.asObject(body.data).paid_amount ??
+        this.asObject(body.data).paidAmount ??
+        this.asObject(body.payment).paid_amount ??
+        this.asObject(body.payment).paidAmount ??
+        this.asObject(body.payment_check).paid_amount,
+    );
 
     const orderNsu =
       this.readString(body.order_nsu) ||
@@ -1121,6 +1164,8 @@ export class BillingService {
       dedupKey,
       eventType,
       paymentStatus,
+      amount,
+      paidAmount,
       orderNsu,
       transactionNsu,
       invoiceSlug,
@@ -1232,6 +1277,28 @@ export class BillingService {
     return ['PAID', 'APPROVED', 'CONFIRMED', 'SUCCEEDED', 'SUCCESS'].includes(normalized);
   }
 
+  private isWebhookPaymentConfirmed(normalized: InfinitePayWebhookNormalized) {
+    if (this.isPaymentConfirmedStatus(normalized.paymentStatus)) return true;
+
+    const hasTransactionNsu = Boolean(String(normalized.transactionNsu || '').trim());
+    const hasReceiptUrl = Boolean(String(normalized.receiptUrl || '').trim());
+    const amount = Number(normalized.amount || 0);
+    const paidAmount = Number(normalized.paidAmount || 0);
+    const paidByAmounts = Number.isFinite(amount) && amount > 0 && paidAmount >= amount;
+
+    if (hasTransactionNsu && hasReceiptUrl && paidByAmounts) {
+      this.logWebhook('[InfinitePay webhook] confirmado por amount/paid_amount + comprovante', {
+        orderNsu: normalized.orderNsu,
+        transactionNsu: normalized.transactionNsu,
+        amount,
+        paidAmount,
+      });
+      return true;
+    }
+
+    return false;
+  }
+
   private extractPaymentCheckStatus(payload: unknown) {
     const body = this.asObject(payload);
     const paid = this.readBoolean(
@@ -1294,6 +1361,21 @@ export class BillingService {
     if (typeof value !== 'string') return false;
     const normalized = value.trim().toLowerCase();
     return ['1', 'true', 'yes', 'on'].includes(normalized);
+  }
+
+  private readNumber(value: unknown) {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : undefined;
+    }
+    if (typeof value === 'string') {
+      const raw = value.trim();
+      const normalized = raw.includes(',')
+        ? raw.replace(/\./g, '').replace(',', '.')
+        : raw;
+      const parsed = Number(normalized);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
   }
 
   private asObject(value: unknown): Record<string, any> {

@@ -202,6 +202,7 @@ export class BillingController {
 
     const result = await this.billingService.handleInfinitePayWebhook(payload, headers);
     this.logWebhook('[InfinitePay webhook] resultado', result);
+    this.logWebhook('[InfinitePay webhook] resposta HTTP final', 200);
     return result;
   }
 
