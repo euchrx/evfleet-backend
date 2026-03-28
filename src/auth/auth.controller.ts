@@ -6,7 +6,7 @@ import { UsersService } from '../users/users.service';
 import { Public } from './public.decorator';
 
 
-@Controller('auth')
+@Controller(['auth', 'api/auth'])
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
