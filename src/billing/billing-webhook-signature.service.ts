@@ -14,6 +14,13 @@ export class BillingWebhookSignatureService {
     headers: Record<string, string | string[] | undefined>,
     rawBody: Buffer,
   ) {
+    if (this.isValidationDisabled()) {
+      console.warn(
+        '[BillingWebhookSignatureService] Validacao de assinatura desabilitada por INFINITEPAY_DISABLE_WEBHOOK_SIGNATURE=true',
+      );
+      return true;
+    }
+
     const secret = this.getWebhookSecret();
     const headerName = this.getSignatureHeaderName();
     const incomingSignature = this.readHeader(headers, headerName);
@@ -42,6 +49,15 @@ export class BillingWebhookSignatureService {
       );
     }
     return secret;
+  }
+
+  private isValidationDisabled() {
+    const value = String(
+      this.configService.get<string>('INFINITEPAY_DISABLE_WEBHOOK_SIGNATURE') || '',
+    )
+      .trim()
+      .toLowerCase();
+    return value === '1' || value === 'true' || value === 'yes' || value === 'on';
   }
 
   private getSignatureHeaderName() {
@@ -82,4 +98,3 @@ export class BillingWebhookSignatureService {
     return trimmed;
   }
 }
-

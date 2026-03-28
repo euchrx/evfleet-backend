@@ -102,6 +102,13 @@ export class BillingController {
   }
 
   @Roles('ADMIN')
+  @Delete('companies/:companyId/payments')
+  async clearCompanyPayments(@Param('companyId') companyId: string, @Req() req: any) {
+    this.assertCompanyAccess(companyId, req);
+    return this.billingService.clearCompanyPayments(companyId);
+  }
+
+  @Roles('ADMIN')
   @Post('companies/:companyId/subscription')
   async createSubscriptionForCompany(
     @Param('companyId') companyId: string,
@@ -149,16 +156,30 @@ export class BillingController {
   }
 
   @Public()
+  @Get('webhooks/infinitepay')
+  async getInfinitePayWebhookDebug() {
+    console.log('[BillingController] GET /billing/webhooks/infinitepay (debug ping)');
+    return { ok: true, route: '/billing/webhooks/infinitepay', method: 'GET' };
+  }
+
+  @Public()
   @Post('webhooks/infinitepay')
   async handleInfinitePayWebhook(
     @Body() payload: unknown,
     @Headers() headers: Record<string, string | string[]>,
     @Req() req: any,
   ) {
+    console.log('[BillingController] POST /billing/webhooks/infinitepay recebido');
+    console.log('[BillingController] Webhook headers:', headers);
+    console.log('[BillingController] Webhook body:', payload);
+
     const rawBody =
       req?.rawBody instanceof Buffer ? req.rawBody : Buffer.from(JSON.stringify(payload ?? {}));
     this.billingWebhookSignatureService.validateOrThrow(headers, rawBody);
-    return this.billingService.handleInfinitePayWebhook(payload, headers);
+
+    const result = await this.billingService.handleInfinitePayWebhook(payload, headers);
+    console.log('[BillingController] Resultado processamento webhook:', result);
+    return result;
   }
 
   private assertCompanyAccess(companyId: string, req: any) {

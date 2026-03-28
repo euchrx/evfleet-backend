@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   BillingGateway,
   PaymentStatus,
@@ -41,6 +42,7 @@ export class BillingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly infinitePayGateway: InfinitePayGateway,
+    private readonly configService: ConfigService,
   ) {}
 
   async listPlans() {
@@ -266,6 +268,21 @@ export class BillingService {
     }));
   }
 
+  async clearCompanyPayments(companyId: string) {
+    if (!companyId?.trim()) {
+      throw new BadRequestException('companyId é obrigatório.');
+    }
+
+    const deleted = await this.prisma.payment.deleteMany({
+      where: { companyId },
+    });
+
+    return {
+      companyId,
+      deletedCount: deleted.count,
+    };
+  }
+
   async createSubscriptionForCompany(companyId: string, planId: string) {
     const now = new Date();
     const currentPeriodEnd = this.addDays(now, 30);
@@ -356,6 +373,7 @@ export class BillingService {
     this.validateMinimumAmountOrThrow(amountCents);
     const description = input.description?.trim() || `Assinatura ${subscription.plan.name}`;
     const orderNsu = `sub_${subscription.id}_${Date.now()}`;
+    const webhookUrl = this.resolveWebhookUrl(input.webhookUrl);
 
     const checkout = await this.infinitePayGateway.createCheckoutLink({
       amountCents,
@@ -363,7 +381,7 @@ export class BillingService {
       description,
       orderNsu,
       redirectUrl: input.redirectUrl,
-      webhookUrl: input.webhookUrl,
+      webhookUrl,
       customer: input.customer || this.buildInfinitePayCustomer(subscription.company),
     });
 
@@ -434,6 +452,7 @@ export class BillingService {
     const dueDate = subscription.nextBillingAt ?? this.addDays(new Date(), 30);
     const orderNsu = `initial_sub_${subscription.id}_${Date.now()}`;
     const description = `Primeiro pagamento da assinatura ${subscription.plan.name}`;
+    const webhookUrl = this.resolveWebhookUrl();
 
     const company = await this.prisma.company.findUnique({
       where: { id: subscription.companyId },
@@ -469,6 +488,7 @@ export class BillingService {
         currency: subscription.plan.currency,
         description,
         orderNsu,
+        webhookUrl,
         customer: company ? this.buildInfinitePayCustomer(company) : undefined,
       });
 
@@ -628,7 +648,20 @@ export class BillingService {
 
   async handleInfinitePayWebhook(payload: unknown, headers?: Record<string, string | string[]>) {
     const normalized = this.normalizeInfinitePayWebhookPayload(payload, headers);
+    console.log('[BillingService] Webhook normalized payload:', {
+      dedupKey: normalized.dedupKey,
+      eventType: normalized.eventType,
+      paymentStatus: normalized.paymentStatus,
+      orderNsu: normalized.orderNsu,
+      transactionNsu: normalized.transactionNsu,
+      invoiceSlug: normalized.invoiceSlug,
+      receiptUrl: normalized.receiptUrl,
+      subscriptionIdHint: normalized.subscriptionIdHint,
+      companyIdHint: normalized.companyIdHint,
+      paymentCheckEnabled: normalized.paymentCheckEnabled,
+    });
     const companyIdForEvent = await this.resolveWebhookCompanyId(normalized);
+    console.log('[BillingService] Webhook companyId resolvido:', companyIdForEvent || '(none)');
 
     let webhookEvent: { id: string } | null = null;
     try {
@@ -659,9 +692,11 @@ export class BillingService {
       normalized.paymentCheckEnabled &&
       normalized.orderNsu
     ) {
+      console.log('[BillingService] payment_check habilitado, consultando order_nsu:', normalized.orderNsu);
       const paymentCheckPayload = await this.infinitePayGateway.checkPayment(normalized.orderNsu);
       const paymentCheckStatus = this.extractPaymentCheckStatus(paymentCheckPayload);
       if (paymentCheckStatus) {
+        console.log('[BillingService] payment_check retornou status:', paymentCheckStatus);
         paymentStatus = paymentCheckStatus;
       }
     }
@@ -688,6 +723,13 @@ export class BillingService {
         if (!payment) {
           throw new NotFoundException('Pagamento não encontrado para o webhook recebido.');
         }
+        console.log('[BillingService] Pagamento conciliado no webhook:', {
+          paymentId: payment.id,
+          companyId: payment.companyId,
+          subscriptionId: payment.subscriptionId,
+          gatewayReference: payment.gatewayReference,
+          statusAtual: payment.status,
+        });
 
         const paidAt = normalized.paidAt ?? new Date();
 
@@ -759,6 +801,7 @@ export class BillingService {
         ...result,
       };
     } catch (error) {
+      console.error('[BillingService] Falha ao processar webhook:', this.getErrorMessage(error));
       await this.prisma.webhookEvent.update({
         where: { id: webhookEvent.id },
         data: {
@@ -911,23 +954,34 @@ export class BillingService {
     normalized: InfinitePayWebhookNormalized,
   ) {
     if (normalized.orderNsu) {
+      console.log('[BillingService] Tentando lookup de pagamento por order_nsu:', normalized.orderNsu);
       const byOrderNsu = await tx.payment.findFirst({
         where: {
           gateway: BillingGateway.INFINITEPAY,
           gatewayReference: normalized.orderNsu,
         },
       });
-      if (byOrderNsu) return byOrderNsu;
+      if (byOrderNsu) {
+        console.log('[BillingService] Lookup por order_nsu encontrou payment:', byOrderNsu.id);
+        return byOrderNsu;
+      }
     }
 
     if (normalized.transactionNsu) {
+      console.log(
+        '[BillingService] Tentando lookup de pagamento por transaction_nsu:',
+        normalized.transactionNsu,
+      );
       const byTransactionNsu = await tx.payment.findFirst({
         where: {
           gateway: BillingGateway.INFINITEPAY,
           externalPaymentId: normalized.transactionNsu,
         },
       });
-      if (byTransactionNsu) return byTransactionNsu;
+      if (byTransactionNsu) {
+        console.log('[BillingService] Lookup por transaction_nsu encontrou payment:', byTransactionNsu.id);
+        return byTransactionNsu;
+      }
     }
 
     if (normalized.subscriptionIdHint) {
@@ -1061,5 +1115,37 @@ export class BillingService {
       minimumFractionDigits: 2,
     });
     return `Valor mínimo para pagamento é ${value}`;
+  }
+  private resolveWebhookUrl(explicitWebhookUrl?: string) {
+    const explicit = String(explicitWebhookUrl || '').trim();
+    if (explicit) {
+      this.assertWebhookUrlIsPublic(explicit);
+      return explicit;
+    }
+
+    const configured = String(
+      this.configService.get<string>('INFINITEPAY_WEBHOOK_URL') ||
+        this.configService.get<string>('BACKEND_PUBLIC_URL') ||
+        '',
+    ).trim();
+    if (!configured) return undefined;
+
+    const normalizedBase = configured.replace(/\/+$/, '');
+    const webhookUrl = `${normalizedBase}/billing/webhooks/infinitepay`;
+    this.assertWebhookUrlIsPublic(webhookUrl);
+    return webhookUrl;
+  }
+
+  private assertWebhookUrlIsPublic(webhookUrl: string) {
+    const normalized = webhookUrl.trim().toLowerCase();
+    if (
+      normalized.includes('localhost') ||
+      normalized.includes('127.0.0.1') ||
+      normalized.includes('0.0.0.0')
+    ) {
+      throw new BadRequestException(
+        'webhook_url inválida para produção. Configure uma URL pública do backend.',
+      );
+    }
   }
 }
