@@ -2,10 +2,12 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Headers,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -18,6 +20,7 @@ import { BillingService } from './billing.service';
 import { CreateCompanySubscriptionDto } from './dto/create-company-subscription.dto';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { CreateSubscriptionCheckoutDto } from './dto/create-subscription-checkout.dto';
+import { UpdatePlanDto } from './dto/update-plan.dto';
 import { CreateCheckoutForSubscriptionUseCase } from './use-cases/create-checkout-for-subscription.use-case';
 import { CreateInitialPaymentForSubscriptionUseCase } from './use-cases/create-initial-payment-for-subscription.use-case';
 import { CreateSubscriptionForCompanyUseCase } from './use-cases/create-subscription-for-company.use-case';
@@ -60,6 +63,18 @@ export class BillingController {
   @Post('plans')
   async createPlan(@Body() dto: CreatePlanDto) {
     return this.billingService.createPlan(dto);
+  }
+
+  @Roles('ADMIN')
+  @Patch('plans/:planId')
+  async updatePlan(@Param('planId') planId: string, @Body() dto: UpdatePlanDto) {
+    return this.billingService.updatePlan(planId, dto);
+  }
+
+  @Roles('ADMIN')
+  @Delete('plans/:planId')
+  async deletePlan(@Param('planId') planId: string) {
+    return this.billingService.deletePlan(planId);
   }
 
   @Roles('ADMIN')

@@ -16,6 +16,7 @@ import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { CreateSubscriptionCheckoutDto } from './dto/create-subscription-checkout.dto';
+import { UpdatePlanDto } from './dto/update-plan.dto';
 import { InfinitePayGateway } from './gateways/infinitepay.gateway';
 
 type InfinitePayWebhookNormalized = {
@@ -108,6 +109,109 @@ export class BillingService {
       }
       throw error;
     }
+  }
+
+  async updatePlan(planId: string, dto: UpdatePlanDto) {
+    const existingPlan = await this.prisma.plan.findUnique({
+      where: { id: planId },
+      select: { id: true, code: true },
+    });
+
+    if (!existingPlan) {
+      throw new NotFoundException('Plano não encontrado.');
+    }
+
+    const code = dto.code?.trim().toUpperCase();
+    const name = dto.name?.trim();
+    const description = dto.description?.trim();
+    const currency = dto.currency?.trim().toUpperCase();
+
+    if (dto.priceCents !== undefined) {
+      if (!Number.isInteger(dto.priceCents) || dto.priceCents <= 0) {
+        throw new BadRequestException('priceCents deve ser maior que zero.');
+      }
+      if (dto.priceCents < this.getMinAmountCents()) {
+        throw new BadRequestException(this.getMinAmountErrorMessage());
+      }
+    }
+
+    if (code && code !== existingPlan.code) {
+      const codeInUse = await this.prisma.plan.findUnique({
+        where: { code },
+        select: { id: true },
+      });
+      if (codeInUse) {
+        throw new BadRequestException('Código do plano já está em uso.');
+      }
+    }
+
+    try {
+      const updated = await this.prisma.plan.update({
+        where: { id: planId },
+        data: {
+          ...(code ? { code } : {}),
+          ...(name !== undefined ? { name } : {}),
+          ...(description !== undefined ? { description: description || null } : {}),
+          ...(dto.priceCents !== undefined ? { priceCents: dto.priceCents } : {}),
+          ...(currency !== undefined ? { currency } : {}),
+          ...(dto.interval !== undefined ? { interval: dto.interval } : {}),
+          ...(dto.active !== undefined ? { isActive: dto.active } : {}),
+        },
+      });
+
+      return {
+        id: updated.id,
+        code: updated.code,
+        name: updated.name,
+        description: updated.description,
+        priceCents: updated.priceCents,
+        currency: updated.currency,
+        interval: updated.interval,
+        active: updated.isActive,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt,
+      };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new BadRequestException('Código do plano já está em uso.');
+      }
+      throw error;
+    }
+  }
+
+  async deletePlan(planId: string) {
+    const existingPlan = await this.prisma.plan.findUnique({
+      where: { id: planId },
+      select: { id: true, name: true },
+    });
+
+    if (!existingPlan) {
+      throw new NotFoundException('Plano não encontrado.');
+    }
+
+    const hasLinkedSubscriptions = await this.prisma.subscription.count({
+      where: { planId },
+    });
+
+    if (hasLinkedSubscriptions > 0) {
+      const updated = await this.prisma.plan.update({
+        where: { id: planId },
+        data: { isActive: false },
+      });
+      return {
+        id: updated.id,
+        name: updated.name,
+        active: updated.isActive,
+        removed: false,
+        message: 'Plano desativado porque possui vínculos com assinaturas.',
+      };
+    }
+
+    await this.prisma.plan.delete({ where: { id: planId } });
+    return { id: planId, removed: true };
   }
 
   async getCompanySubscription(companyId: string) {
