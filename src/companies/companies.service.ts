@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
@@ -11,6 +11,8 @@ import { UpdateCompanyDto } from './dto/update-company.dto';
 @Injectable()
 export class CompaniesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private readonly TRIAL_DAYS = 15;
 
   async create(dto: CreateCompanyDto) {
     const normalizedName = dto.name?.trim();
@@ -27,6 +29,18 @@ export class CompaniesService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
+        const defaultPlan = await tx.plan.findFirst({
+          where: { isActive: true },
+          orderBy: [{ priceCents: 'asc' }, { createdAt: 'asc' }],
+          select: { id: true },
+        });
+
+        if (!defaultPlan) {
+          throw new BadRequestException(
+            'Nenhum plano ativo encontrado. Cadastre e ative ao menos um plano antes de criar empresa.',
+          );
+        }
+
         const createdCompany = await tx.company.create({
           data: {
             name: normalizedName,
@@ -50,6 +64,21 @@ export class CompaniesService {
             city: 'Nao informado',
             state: 'NI',
             companyId: createdCompany.id,
+          },
+        });
+
+        const now = new Date();
+        const trialEndsAt = this.addDays(now, this.TRIAL_DAYS);
+        await tx.subscription.create({
+          data: {
+            companyId: createdCompany.id,
+            planId: defaultPlan.id,
+            status: SubscriptionStatus.TRIALING,
+            startedAt: now,
+            trialEndsAt,
+            currentPeriodStart: now,
+            currentPeriodEnd: trialEndsAt,
+            nextBillingAt: trialEndsAt,
           },
         });
 
@@ -213,5 +242,11 @@ export class CompaniesService {
     if (existingSlug && existingSlug.id !== ignoreId) {
       throw new BadRequestException('Slug já está em uso.');
     }
+  }
+
+  private addDays(date: Date, days: number) {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
   }
 }
