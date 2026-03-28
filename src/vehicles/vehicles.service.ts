@@ -52,13 +52,28 @@ export class VehiclesService {
       select: { id: true },
     });
 
-    if (!firstBranch) {
-      throw new BadRequestException(
-        'Empresa sem estabelecimento operacional vinculado.',
-      );
+    if (firstBranch) return firstBranch.id;
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, name: true },
+    });
+
+    if (!company) {
+      throw new BadRequestException('Empresa vinculada nao encontrada.');
     }
 
-    return firstBranch.id;
+    const createdBranch = await this.prisma.branch.create({
+      data: {
+        companyId: company.id,
+        name: company.name,
+        city: 'Nao informado',
+        state: 'NI',
+      },
+      select: { id: true },
+    });
+
+    return createdBranch.id;
   }
 
   private withProfilePhotoUrl<T extends { id: string; profilePhoto?: { id: string } | null }>(
