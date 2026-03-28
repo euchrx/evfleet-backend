@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -27,19 +28,24 @@ export class DriversService {
       await this.ensureVehicleExists(dto.vehicleId);
     }
 
-    return prisma.driver.create({
-      data: {
-        name: dto.name,
-        cpf: dto.cpf,
-        cnh: dto.cnh,
-        cnhCategory: dto.cnhCategory,
-        cnhExpiresAt: new Date(dto.cnhExpiresAt),
-        phone: dto.phone ?? null,
-        status: dto.status,
-        vehicleId: dto.vehicleId ?? null,
-      },
-      include: this.includeVehicle,
-    });
+    try {
+      return await prisma.driver.create({
+        data: {
+          name: dto.name,
+          cpf: dto.cpf,
+          cnh: dto.cnh,
+          cnhCategory: dto.cnhCategory,
+          cnhExpiresAt: new Date(dto.cnhExpiresAt),
+          phone: dto.phone ?? null,
+          status: dto.status,
+          vehicleId: dto.vehicleId ?? null,
+        },
+        include: this.includeVehicle,
+      });
+    } catch (error: any) {
+      this.handleUniqueConstraint(error);
+      throw error;
+    }
   }
 
   async findAll() {
@@ -74,22 +80,27 @@ export class DriversService {
       await this.ensureVehicleExists(dto.vehicleId);
     }
 
-    return prisma.driver.update({
-      where: { id },
-      data: {
-        ...(dto.name !== undefined ? { name: dto.name } : {}),
-        ...(dto.cpf !== undefined ? { cpf: dto.cpf } : {}),
-        ...(dto.cnh !== undefined ? { cnh: dto.cnh } : {}),
-        ...(dto.cnhCategory !== undefined ? { cnhCategory: dto.cnhCategory } : {}),
-        ...(dto.cnhExpiresAt !== undefined
-          ? { cnhExpiresAt: new Date(dto.cnhExpiresAt) }
-          : {}),
-        ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
-        ...(dto.status !== undefined ? { status: dto.status } : {}),
-        ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
-      },
-      include: this.includeVehicle,
-    });
+    try {
+      return await prisma.driver.update({
+        where: { id },
+        data: {
+          ...(dto.name !== undefined ? { name: dto.name } : {}),
+          ...(dto.cpf !== undefined ? { cpf: dto.cpf } : {}),
+          ...(dto.cnh !== undefined ? { cnh: dto.cnh } : {}),
+          ...(dto.cnhCategory !== undefined ? { cnhCategory: dto.cnhCategory } : {}),
+          ...(dto.cnhExpiresAt !== undefined
+            ? { cnhExpiresAt: new Date(dto.cnhExpiresAt) }
+            : {}),
+          ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
+          ...(dto.status !== undefined ? { status: dto.status } : {}),
+          ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
+        },
+        include: this.includeVehicle,
+      });
+    } catch (error: any) {
+      this.handleUniqueConstraint(error);
+      throw error;
+    }
   }
 
   async remove(id: string) {
@@ -106,5 +117,22 @@ export class DriversService {
     });
 
     if (!exists) throw new NotFoundException('Veiculo nao encontrado');
+  }
+
+  private handleUniqueConstraint(error: any) {
+    if (error?.code !== 'P2002') return;
+
+    const target = Array.isArray(error?.meta?.target)
+      ? (error.meta.target as string[])
+      : [];
+
+    if (target.includes('cpf')) {
+      throw new ConflictException('CPF já cadastrado.');
+    }
+    if (target.includes('cnh')) {
+      throw new ConflictException('CNH já cadastrada.');
+    }
+
+    throw new ConflictException('Registro duplicado. Verifique os dados informados.');
   }
 }
