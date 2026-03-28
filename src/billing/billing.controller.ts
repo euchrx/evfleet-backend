@@ -111,6 +111,12 @@ export class BillingController {
   }
 
   @Roles('ADMIN')
+  @Post('companies/:companyId/subscription/cancel')
+  async cancelCompanySubscription(@Param('companyId') companyId: string) {
+    return this.billingService.cancelCompanySubscription(companyId);
+  }
+
+  @Roles('ADMIN')
   @Post('subscriptions/:subscriptionId/pay')
   async createInitialPaymentForSubscription(
     @Param('subscriptionId') subscriptionId: string,

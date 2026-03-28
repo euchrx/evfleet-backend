@@ -289,13 +289,8 @@ export class BillingService {
             in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING],
           },
         },
-        select: { id: true, status: true },
+        include: { plan: true },
       });
-      if (existing) {
-        throw new BadRequestException(
-          `A empresa já possui assinatura ${existing.status}.`,
-        );
-      }
 
       const plan = await tx.plan.findUnique({
         where: { id: planId },
@@ -306,6 +301,20 @@ export class BillingService {
       }
       if (!plan.isActive) {
         throw new BadRequestException('Plano inativo não pode ser utilizado.');
+      }
+
+      if (existing) {
+        if (existing.planId === plan.id) {
+          return existing;
+        }
+
+        return tx.subscription.update({
+          where: { id: existing.id },
+          data: {
+            planId: plan.id,
+          },
+          include: { plan: true },
+        });
       }
 
       return tx.subscription.create({
@@ -524,6 +533,50 @@ export class BillingService {
     }
 
     return this.createInitialPaymentForSubscription(subscription.id, companyId);
+  }
+
+  async cancelCompanySubscription(companyId: string) {
+    if (!companyId?.trim()) {
+      throw new BadRequestException('companyId é obrigatório.');
+    }
+
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { companyId },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      include: { plan: true },
+    });
+
+    if (!subscription) {
+      throw new NotFoundException('Nenhuma assinatura encontrada para a empresa.');
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        status: SubscriptionStatus.CANCELED,
+        currentPeriodEnd: now,
+        nextBillingAt: now,
+      },
+      include: { plan: true },
+    });
+
+    return {
+      id: updated.id,
+      companyId: updated.companyId,
+      status: updated.status,
+      currentPeriodStart: updated.currentPeriodStart,
+      currentPeriodEnd: updated.currentPeriodEnd,
+      nextBillingAt: updated.nextBillingAt,
+      plan: {
+        id: updated.plan.id,
+        code: updated.plan.code,
+        name: updated.plan.name,
+        priceCents: updated.plan.priceCents,
+        currency: updated.plan.currency,
+        interval: updated.plan.interval,
+      },
+    };
   }
 
   async handleInfinitePayWebhook(payload: unknown, headers?: Record<string, string | string[]>) {
