@@ -410,13 +410,14 @@ export class BillingService {
     const description = input.description?.trim() || `Assinatura ${subscription.plan.name}`;
     const orderNsu = `sub_${subscription.id}_${Date.now()}`;
     const webhookUrl = this.resolveWebhookUrl(input.webhookUrl);
+    const redirectUrl = this.resolveRedirectUrl(input.redirectUrl);
 
     const checkout = await this.infinitePayGateway.createCheckoutLink({
       amountCents,
       currency: subscription.plan.currency,
       description,
       orderNsu,
-      redirectUrl: input.redirectUrl,
+      redirectUrl,
       webhookUrl,
       customer: input.customer || this.buildInfinitePayCustomer(subscription.company),
     });
@@ -489,6 +490,7 @@ export class BillingService {
     const orderNsu = `initial_sub_${subscription.id}_${Date.now()}`;
     const description = `Primeiro pagamento da assinatura ${subscription.plan.name}`;
     const webhookUrl = this.resolveWebhookUrl();
+    const redirectUrl = this.resolveRedirectUrl();
 
     const company = await this.prisma.company.findUnique({
       where: { id: subscription.companyId },
@@ -524,6 +526,7 @@ export class BillingService {
         currency: subscription.plan.currency,
         description,
         orderNsu,
+        redirectUrl,
         webhookUrl,
         customer: company ? this.buildInfinitePayCustomer(company) : undefined,
       });
@@ -1350,6 +1353,62 @@ export class BillingService {
     const webhookUrl = `${normalizedBase}/billing/webhooks/infinitepay`;
     this.assertWebhookUrlIsPublic(webhookUrl);
     return webhookUrl;
+  }
+
+  private resolveRedirectUrl(explicitRedirectUrl?: string) {
+    const explicit = String(explicitRedirectUrl || '').trim();
+    if (explicit) {
+      this.assertRedirectUrlIsPublic(explicit);
+      return explicit;
+    }
+
+    const configuredRedirect = String(
+      this.configService?.get<string>('INFINITEPAY_REDIRECT_URL') || '',
+    ).trim();
+    if (configuredRedirect) {
+      this.assertRedirectUrlIsPublic(configuredRedirect);
+      return configuredRedirect;
+    }
+
+    const frontendBase = String(
+      this.configService?.get<string>('FRONTEND_PUBLIC_URL') ||
+        this.extractFirstCorsOrigin(this.configService?.get<string>('CORS_ORIGINS')) ||
+        '',
+    ).trim();
+    if (!frontendBase) return undefined;
+
+    const redirectUrl = `${frontendBase.replace(/\/+$/, '')}/billing/success`;
+    this.assertRedirectUrlIsPublic(redirectUrl);
+    return redirectUrl;
+  }
+
+  private extractFirstCorsOrigin(value?: string) {
+    if (!value) return '';
+    return (
+      value
+        .split(',')
+        .map((origin) => origin.trim())
+        .find(Boolean) || ''
+    );
+  }
+
+  private assertRedirectUrlIsPublic(redirectUrl: string) {
+    let parsed: URL;
+    try {
+      parsed = new URL(redirectUrl.trim());
+    } catch {
+      throw new BadRequestException('redirect_url invÃ¡lida. Informe uma URL HTTPS pÃºblica.');
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    if (parsed.protocol !== 'https:') {
+      throw new BadRequestException('redirect_url invÃ¡lida. A URL deve usar HTTPS.');
+    }
+    if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') {
+      throw new BadRequestException(
+        'redirect_url invÃ¡lida para produÃ§Ã£o. Configure uma URL pÃºblica do frontend.',
+      );
+    }
   }
 
   private assertWebhookUrlIsPublic(webhookUrl: string) {

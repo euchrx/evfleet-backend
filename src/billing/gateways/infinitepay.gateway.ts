@@ -83,6 +83,7 @@ export class InfinitePayGateway {
     }
 
     const endpoint = `${baseUrl.replace(/\/+$/, '')}/invoices/public/checkout/links`;
+    console.log('[InfinitePay] payload:', payload);
     const response = await fetch(
       endpoint,
       {
