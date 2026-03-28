@@ -1,16 +1,24 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import { AppModule } from './app.module';
 
 function normalizeOrigin(origin: string) {
   return origin
     .trim()
-    .replace(/^['\"]+|['\"]+$/g, '')
+    .replace(/^['"]+|['"]+$/g, '')
     .replace(/\/+$/, '')
     .toLowerCase();
+}
+
+function extractHostname(origin: string) {
+  try {
+    return new URL(origin).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
 }
 
 async function bootstrap() {
@@ -18,12 +26,11 @@ async function bootstrap() {
     rawBody: true,
   });
   app.enableShutdownHooks();
-  const uploadsPath = join(process.cwd(), 'uploads');
 
+  const uploadsPath = join(process.cwd(), 'uploads');
   if (!existsSync(uploadsPath)) {
     mkdirSync(uploadsPath, { recursive: true });
   }
-
   app.useStaticAssets(uploadsPath, {
     prefix: '/uploads/',
   });
@@ -71,12 +78,13 @@ async function bootstrap() {
       }
 
       const incomingOrigin = normalizeOrigin(origin);
+      const hostname = extractHostname(incomingOrigin);
       const isKnownHost =
-        incomingOrigin.endsWith('.vercel.app') ||
-        incomingOrigin.endsWith('.railway.app');
+        hostname.endsWith('.vercel.app') || hostname.endsWith('.railway.app');
       const matchesPattern = corsOriginPatterns.some((pattern) =>
         pattern.test(incomingOrigin),
       );
+
       callback(
         null,
         allowedOrigins.has(incomingOrigin) || matchesPattern || isKnownHost,
@@ -84,7 +92,14 @@ async function bootstrap() {
     },
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['*'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'x-company-scope',
+      'Accept',
+      'Origin',
+      'X-Requested-With',
+    ],
     preflightContinue: false,
     optionsSuccessStatus: 204,
   });
@@ -99,7 +114,7 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '0.0.0.0';
-
   await app.listen(port, host);
 }
+
 bootstrap();

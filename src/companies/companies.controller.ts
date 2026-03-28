@@ -29,9 +29,14 @@ export class CompaniesController {
   @Get('me')
   @AllowInadimplenteAccess()
   async findCurrent(@Req() req: any) {
-    console.log('companyId:', req?.user?.companyId);
-
+    const role = String(req?.user?.role || '').trim().toUpperCase();
     const companyId = String(req?.user?.companyId || '').trim();
+
+    // Superadmin pode operar sem empresa fixa
+    if (!companyId && role === 'ADMIN') {
+      return null;
+    }
+
     if (!companyId) {
       throw new UnauthorizedException(
         'Usuário autenticado sem companyId. Vincule o usuário a uma empresa.',

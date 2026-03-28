@@ -154,6 +154,13 @@ export class CompaniesService {
   async remove(id: string) {
     await this.findOne(id);
 
+    const dependencySummary = await this.getCompanyDependencySummary(id);
+    if (dependencySummary.length > 0) {
+      throw new BadRequestException(
+        `Não foi possível remover a empresa. Remova os vínculos antes: ${dependencySummary.join(', ')}.`,
+      );
+    }
+
     try {
       await this.prisma.company.delete({ where: { id } });
       return { message: 'Empresa removida com sucesso.' };
@@ -162,6 +169,26 @@ export class CompaniesService {
         'Não foi possível remover a empresa. Verifique vínculos existentes.',
       );
     }
+  }
+
+  private async getCompanyDependencySummary(companyId: string) {
+    const [branches, users, subscriptions, payments, webhookEvents] =
+      await Promise.all([
+        this.prisma.branch.count({ where: { companyId } }),
+        this.prisma.user.count({ where: { companyId } }),
+        this.prisma.subscription.count({ where: { companyId } }),
+        this.prisma.payment.count({ where: { companyId } }),
+        this.prisma.webhookEvent.count({ where: { companyId } }),
+      ]);
+
+    const summary: string[] = [];
+    if (branches > 0) summary.push(`${branches} filial(is)`);
+    if (users > 0) summary.push(`${users} usuário(s)`);
+    if (subscriptions > 0) summary.push(`${subscriptions} assinatura(s)`);
+    if (payments > 0) summary.push(`${payments} pagamento(s)`);
+    if (webhookEvents > 0) summary.push(`${webhookEvents} evento(s) de webhook`);
+
+    return summary;
   }
 
   private async ensureSlugAvailable(slug: string, ignoreId?: string) {
