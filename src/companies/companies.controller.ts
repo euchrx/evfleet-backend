@@ -47,6 +47,9 @@ export class CompaniesController {
       return await this.companiesService.findOne(companyId);
     } catch (error) {
       if (error instanceof NotFoundException) {
+        if (role === 'ADMIN') {
+          return null;
+        }
         throw new UnauthorizedException(
           'Empresa não encontrada para usuário autenticado',
         );
