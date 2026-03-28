@@ -27,8 +27,7 @@ export class VehiclesService {
         where: { id: branchId },
         select: { id: true },
       });
-      if (!branchExists) throw new NotFoundException('Branch nao encontrada');
-      return branchExists.id;
+      if (branchExists) return branchExists.id;
     }
 
     const role = String(context?.role || '').trim().toUpperCase();
