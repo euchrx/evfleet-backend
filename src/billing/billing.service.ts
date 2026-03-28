@@ -1234,6 +1234,13 @@ export class BillingService {
 
   private extractPaymentCheckStatus(payload: unknown) {
     const body = this.asObject(payload);
+    const paid = this.readBoolean(
+      body.paid ??
+        this.asObject(body.data).paid ??
+        this.asObject(body.payment).paid ??
+        this.asObject(body.payment_check).paid,
+    );
+    if (paid) return 'PAID';
     return (
       this.readString(body.status) ||
       this.readString(this.asObject(body.data).status) ||

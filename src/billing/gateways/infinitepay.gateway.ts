@@ -1,4 +1,9 @@
-import { BadGatewayException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export type CreateInfinitePayCheckoutInput = {
@@ -164,15 +169,24 @@ export class InfinitePayGateway {
     const baseUrl =
       String(this.configService.get<string>('INFINITEPAY_BASE_URL') || '').trim() ||
       'https://api.infinitepay.io';
-    const pathTemplate =
+    const path =
       String(this.configService.get<string>('INFINITEPAY_PAYMENT_CHECK_PATH') || '').trim() ||
-      '/invoices/public/payment_check/{order_nsu}';
-    const method =
-      String(this.configService.get<string>('INFINITEPAY_PAYMENT_CHECK_METHOD') || 'GET')
-        .trim()
-        .toUpperCase() || 'GET';
+      '/invoices/public/checkout/payment_check';
+    const method = 'POST' as const;
     const apiKey = String(this.configService.get<string>('INFINITEPAY_API_KEY') || '').trim();
     const handle = String(this.configService.get<string>('INFINITEPAY_HANDLE') || '').trim();
+    const orderNsu = String(input.orderNsu || '').trim();
+
+    if (!handle) {
+      throw new ServiceUnavailableException(
+        'Configuracao do InfinitePay ausente. Defina INFINITEPAY_HANDLE.',
+      );
+    }
+    if (!orderNsu) {
+      throw new BadRequestException(
+        'order_nsu ausente para consultar payment_check do InfinitePay.',
+      );
+    }
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -181,34 +195,65 @@ export class InfinitePayGateway {
       headers.Authorization = `Bearer ${apiKey}`;
     }
 
-    const path = pathTemplate.replace('{order_nsu}', encodeURIComponent(input.orderNsu));
     const endpoint = `${baseUrl.replace(/\/+$/, '')}${path}`;
     const payload = {
       handle,
-      order_nsu: input.orderNsu,
+      order_nsu: orderNsu,
       ...(input.transactionNsu ? { transaction_nsu: input.transactionNsu } : {}),
       ...(input.slug ? { slug: input.slug } : {}),
     };
 
+    this.logDiagnostic('[InfinitePayGateway] payment_check request', {
+      endpoint,
+      method,
+      payload,
+    });
+
     const response = await fetch(endpoint, {
       method,
       headers,
-      ...(method === 'POST' ? { body: JSON.stringify(payload) } : {}),
+      body: JSON.stringify(payload),
     });
+
+    let rawBody = '';
+    let parsedBody: unknown = null;
+    try {
+      rawBody = await response.text();
+      parsedBody = rawBody ? JSON.parse(rawBody) : null;
+    } catch {
+      parsedBody = null;
+    }
+
+    this.logDiagnostic('[InfinitePayGateway] payment_check response', {
+      endpoint,
+      method,
+      status: response.status,
+      body: rawBody || parsedBody,
+    });
+
     if (!response.ok) {
       console.warn('[InfinitePayGateway] payment_check upstream non-ok', {
         endpoint,
         method,
         status: response.status,
+        body: rawBody || parsedBody,
       });
       return null;
     }
 
-    try {
-      return await response.json();
-    } catch {
-      return null;
+    return parsedBody;
+  }
+
+  private logDiagnostic(message: string, payload?: unknown) {
+    const enabled =
+      this.readBooleanEnv('INFINITEPAY_WEBHOOK_DEBUG') ||
+      this.readBooleanEnv('INFINITEPAY_DIAGNOSTIC');
+    if (!enabled) return;
+    if (payload === undefined) {
+      console.log(message);
+      return;
     }
+    console.log(message, payload);
   }
 
   private readBooleanEnv(key: string) {

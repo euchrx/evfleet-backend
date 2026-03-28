@@ -60,6 +60,16 @@ export class BillingController {
     return this.billingService.createInitialPaymentForCompany(companyId);
   }
 
+  @Post('me/subscription')
+  async selectMyCompanyPlan(@Body() dto: CreateCompanySubscriptionDto, @Req() req: any) {
+    const companyId = this.requireAuthenticatedCompanyId(req);
+    return this.createSubscriptionForCompanyUseCase.execute(
+      companyId,
+      dto.planId,
+      dto.initialStatus,
+    );
+  }
+
   @Post('check-payment')
   async checkPayment(@Body() dto: CheckPaymentDto, @Req() req: any) {
     return this.billingService.checkPaymentFallback(dto, {
