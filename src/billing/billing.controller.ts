@@ -114,7 +114,11 @@ export class BillingController {
     @Param('companyId') companyId: string,
     @Body() dto: CreateCompanySubscriptionDto,
   ) {
-    return this.createSubscriptionForCompanyUseCase.execute(companyId, dto.planId);
+    return this.createSubscriptionForCompanyUseCase.execute(
+      companyId,
+      dto.planId,
+      dto.initialStatus,
+    );
   }
 
   @Roles('ADMIN')

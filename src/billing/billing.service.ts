@@ -1,4 +1,5 @@
 import {
+  Optional,
   BadRequestException,
   Injectable,
   InternalServerErrorException,
@@ -37,12 +38,17 @@ type InfinitePayWebhookNormalized = {
   rawPayload: unknown;
 };
 
+type CompanySubscriptionInitialStatus = Extract<
+  SubscriptionStatus,
+  'TRIALING' | 'ACTIVE'
+>;
+
 @Injectable()
 export class BillingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly infinitePayGateway: InfinitePayGateway,
-    private readonly configService: ConfigService,
+    @Optional() private readonly configService?: ConfigService,
   ) {}
 
   async listPlans() {
@@ -283,9 +289,16 @@ export class BillingService {
     };
   }
 
-  async createSubscriptionForCompany(companyId: string, planId: string) {
+  async createSubscriptionForCompany(
+    companyId: string,
+    planId: string,
+    initialStatus: CompanySubscriptionInitialStatus = 'TRIALING',
+  ) {
     const now = new Date();
-    const currentPeriodEnd = this.addDays(now, 30);
+    const currentPeriodEnd =
+      initialStatus === 'ACTIVE'
+        ? this.computePeriodEnd(now, PlanInterval.MONTHLY)
+        : this.addDays(now, 30);
 
     return this.prisma.$transaction(async (tx) => {
       const company = await tx.company.findUnique({
@@ -311,7 +324,7 @@ export class BillingService {
 
       const plan = await tx.plan.findUnique({
         where: { id: planId },
-        select: { id: true, isActive: true },
+        select: { id: true, isActive: true, interval: true },
       });
       if (!plan) {
         throw new NotFoundException('Plano não encontrado.');
@@ -329,6 +342,16 @@ export class BillingService {
           where: { id: existing.id },
           data: {
             planId: plan.id,
+            status: initialStatus,
+            currentPeriodStart: now,
+            currentPeriodEnd:
+              initialStatus === 'ACTIVE'
+                ? this.computePeriodEnd(now, existing.plan.interval)
+                : this.addDays(now, 30),
+            nextBillingAt:
+              initialStatus === 'ACTIVE'
+                ? this.computePeriodEnd(now, existing.plan.interval)
+                : this.addDays(now, 30),
           },
           include: { plan: true },
         });
@@ -338,10 +361,16 @@ export class BillingService {
         data: {
           companyId,
           planId: plan.id,
-          status: SubscriptionStatus.TRIALING,
+          status: initialStatus,
           currentPeriodStart: now,
-          currentPeriodEnd,
-          nextBillingAt: currentPeriodEnd,
+          currentPeriodEnd:
+            initialStatus === 'ACTIVE'
+              ? this.computePeriodEnd(now, plan.interval)
+              : currentPeriodEnd,
+          nextBillingAt:
+            initialStatus === 'ACTIVE'
+              ? this.computePeriodEnd(now, plan.interval)
+              : currentPeriodEnd,
         },
         include: { plan: true },
       });
@@ -1124,8 +1153,8 @@ export class BillingService {
     }
 
     const configured = String(
-      this.configService.get<string>('INFINITEPAY_WEBHOOK_URL') ||
-        this.configService.get<string>('BACKEND_PUBLIC_URL') ||
+      this.configService?.get<string>('INFINITEPAY_WEBHOOK_URL') ||
+        this.configService?.get<string>('BACKEND_PUBLIC_URL') ||
         '',
     ).trim();
     if (!configured) return undefined;
