@@ -1,6 +1,7 @@
 import {
   Optional,
   BadRequestException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -42,6 +43,12 @@ type CompanySubscriptionInitialStatus = Extract<
   SubscriptionStatus,
   'TRIALING' | 'ACTIVE'
 >;
+
+type CheckPaymentInput = {
+  order_nsu: string;
+  transaction_nsu?: string;
+  slug?: string;
+};
 
 @Injectable()
 export class BillingService {
@@ -584,6 +591,156 @@ export class BillingService {
     return this.createInitialPaymentForSubscription(subscription.id, companyId);
   }
 
+  async checkPaymentFallback(
+    input: CheckPaymentInput,
+    context: { companyId?: string; role?: string } = {},
+  ) {
+    const orderNsu = String(input.order_nsu || '').trim();
+    const transactionNsu = String(input.transaction_nsu || '').trim();
+    const slug = String(input.slug || '').trim();
+
+    if (!orderNsu) {
+      throw new BadRequestException('order_nsu Ã© obrigatÃ³rio.');
+    }
+
+    const paymentCheckPayload = await this.infinitePayGateway.checkPayment(
+      {
+        orderNsu,
+        ...(transactionNsu ? { transactionNsu } : {}),
+        ...(slug ? { slug } : {}),
+      },
+      { force: true },
+    );
+
+    if (!paymentCheckPayload) {
+      return {
+        confirmed: false,
+        paymentStatus: 'PENDING',
+        message: 'Pagamento em processamento.',
+      };
+    }
+
+    const normalized = this.normalizeInfinitePayWebhookPayload(paymentCheckPayload);
+    const effectiveOrderNsu = normalized.orderNsu || orderNsu;
+    const effectiveTransactionNsu = normalized.transactionNsu || transactionNsu || undefined;
+    const effectiveSlug = normalized.invoiceSlug || slug || undefined;
+    const effectiveReceiptUrl = normalized.receiptUrl || undefined;
+    const effectivePaidAt = normalized.paidAt || new Date();
+
+    let payment = await this.prisma.payment.findFirst({
+      where: {
+        gateway: BillingGateway.INFINITEPAY,
+        gatewayReference: effectiveOrderNsu,
+      },
+      include: {
+        subscription: { include: { plan: true } },
+      },
+    });
+
+    if (!payment && effectiveTransactionNsu) {
+      payment = await this.prisma.payment.findFirst({
+        where: {
+          gateway: BillingGateway.INFINITEPAY,
+          externalPaymentId: effectiveTransactionNsu,
+        },
+        include: {
+          subscription: { include: { plan: true } },
+        },
+      });
+    }
+
+    if (!payment) {
+      return {
+        confirmed: false,
+        paymentStatus: normalized.paymentStatus || 'PENDING',
+        paymentFound: false,
+        orderNsu: effectiveOrderNsu,
+        transactionNsu: effectiveTransactionNsu,
+        message: 'Pagamento ainda nÃ£o conciliado no sistema.',
+      };
+    }
+
+    const callerCompanyId = String(context.companyId || '').trim();
+    const callerRole = String(context.role || '').trim().toUpperCase();
+    if (callerRole !== 'ADMIN' && callerCompanyId && payment.companyId !== callerCompanyId) {
+      throw new ForbiddenException('Acesso negado para pagamento de outra empresa.');
+    }
+
+    if (!this.isPaymentConfirmedStatus(normalized.paymentStatus)) {
+      return {
+        confirmed: false,
+        paymentId: payment.id,
+        paymentStatus: payment.status,
+        orderNsu: effectiveOrderNsu,
+        transactionNsu: effectiveTransactionNsu,
+        message: 'Pagamento em processamento.',
+      };
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const refreshed = await tx.payment.findUnique({
+        where: { id: payment!.id },
+        include: {
+          subscription: {
+            include: {
+              plan: true,
+            },
+          },
+        },
+      });
+      if (!refreshed) {
+        throw new NotFoundException('Pagamento nÃ£o encontrado.');
+      }
+
+      const updatedPayment = await tx.payment.update({
+        where: { id: refreshed.id },
+        data: {
+          status: PaymentStatus.PAID,
+          paidAt: effectivePaidAt,
+          gatewayReference: effectiveOrderNsu,
+          ...(effectiveTransactionNsu
+            ? { externalPaymentId: effectiveTransactionNsu }
+            : {}),
+          ...(effectiveReceiptUrl ? { invoiceUrl: effectiveReceiptUrl } : {}),
+          metadata: {
+            ...(refreshed.metadata && typeof refreshed.metadata === 'object'
+              ? refreshed.metadata
+              : {}),
+            ...(effectiveSlug ? { invoice_slug: effectiveSlug } : {}),
+            ...(effectiveTransactionNsu
+              ? { transaction_nsu: effectiveTransactionNsu }
+              : {}),
+            payment_check_response: this.toInputJson(paymentCheckPayload),
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      const periodStart = effectivePaidAt;
+      const periodEnd = this.computePeriodEnd(periodStart, refreshed.subscription.plan.interval);
+      await tx.subscription.update({
+        where: { id: refreshed.subscriptionId },
+        data: {
+          status: SubscriptionStatus.ACTIVE,
+          currentPeriodStart: periodStart,
+          currentPeriodEnd: periodEnd,
+          nextBillingAt: periodEnd,
+        },
+      });
+
+      return updatedPayment;
+    });
+
+    return {
+      confirmed: true,
+      paymentId: result.id,
+      paymentStatus: result.status,
+      orderNsu: effectiveOrderNsu,
+      transactionNsu: effectiveTransactionNsu,
+      receiptUrl: effectiveReceiptUrl,
+      message: 'Pagamento confirmado com sucesso.',
+    };
+  }
+
   async cancelCompanySubscription(companyId: string) {
     if (!companyId?.trim()) {
       throw new BadRequestException('companyId é obrigatório.');
@@ -677,7 +834,7 @@ export class BillingService {
 
   async handleInfinitePayWebhook(payload: unknown, headers?: Record<string, string | string[]>) {
     const normalized = this.normalizeInfinitePayWebhookPayload(payload, headers);
-    console.log('[BillingService] Webhook normalized payload:', {
+    this.logWebhook('[InfinitePay webhook] payload normalizado', {
       dedupKey: normalized.dedupKey,
       eventType: normalized.eventType,
       paymentStatus: normalized.paymentStatus,
@@ -689,8 +846,13 @@ export class BillingService {
       companyIdHint: normalized.companyIdHint,
       paymentCheckEnabled: normalized.paymentCheckEnabled,
     });
+    this.logWebhook('[InfinitePay webhook] order_nsu extraido', normalized.orderNsu || null);
+    this.logWebhook(
+      '[InfinitePay webhook] transaction_nsu extraido',
+      normalized.transactionNsu || null,
+    );
     const companyIdForEvent = await this.resolveWebhookCompanyId(normalized);
-    console.log('[BillingService] Webhook companyId resolvido:', companyIdForEvent || '(none)');
+    this.logWebhook('[InfinitePay webhook] companyId resolvido', companyIdForEvent || '(none)');
 
     let webhookEvent: { id: string } | null = null;
     try {
@@ -721,11 +883,16 @@ export class BillingService {
       normalized.paymentCheckEnabled &&
       normalized.orderNsu
     ) {
-      console.log('[BillingService] payment_check habilitado, consultando order_nsu:', normalized.orderNsu);
-      const paymentCheckPayload = await this.infinitePayGateway.checkPayment(normalized.orderNsu);
+      this.logWebhook(
+        '[InfinitePay webhook] payment_check habilitado consultando order_nsu',
+        normalized.orderNsu,
+      );
+      const paymentCheckPayload = await this.infinitePayGateway.checkPayment({
+        orderNsu: normalized.orderNsu,
+      });
       const paymentCheckStatus = this.extractPaymentCheckStatus(paymentCheckPayload);
       if (paymentCheckStatus) {
-        console.log('[BillingService] payment_check retornou status:', paymentCheckStatus);
+        this.logWebhook('[InfinitePay webhook] payment_check status', paymentCheckStatus);
         paymentStatus = paymentCheckStatus;
       }
     }
@@ -752,7 +919,7 @@ export class BillingService {
         if (!payment) {
           throw new NotFoundException('Pagamento não encontrado para o webhook recebido.');
         }
-        console.log('[BillingService] Pagamento conciliado no webhook:', {
+        this.logWebhook('[InfinitePay webhook] lookup do Payment encontrado', {
           paymentId: payment.id,
           companyId: payment.companyId,
           subscriptionId: payment.subscriptionId,
@@ -808,6 +975,13 @@ export class BillingService {
           },
         });
 
+        this.logWebhook('[InfinitePay webhook] atualizacao Payment/Subscription concluida', {
+          paymentId: updatedPayment.id,
+          paymentStatus: updatedPayment.status,
+          subscriptionId: updatedSubscription.id,
+          subscriptionStatus: updatedSubscription.status,
+        });
+
         await tx.webhookEvent.update({
           where: { id: webhookEvent!.id },
           data: {
@@ -830,7 +1004,7 @@ export class BillingService {
         ...result,
       };
     } catch (error) {
-      console.error('[BillingService] Falha ao processar webhook:', this.getErrorMessage(error));
+      this.logWebhook('[InfinitePay webhook] falha no processamento', this.getErrorMessage(error), true);
       await this.prisma.webhookEvent.update({
         where: { id: webhookEvent.id },
         data: {
@@ -860,6 +1034,15 @@ export class BillingService {
       this.readString(body.eventType) ||
       'UNKNOWN';
 
+    const paidBoolean = this.readBoolean(
+      body.paid ??
+        this.asObject(body.data).paid ??
+        this.asObject(body.payment).paid ??
+        this.asObject(body.payment_check).paid ??
+        body.is_paid ??
+        this.asObject(body.data).is_paid,
+    );
+
     const paymentStatus =
       this.readString(body.status) ||
       this.readString(body.paymentStatus) ||
@@ -867,6 +1050,7 @@ export class BillingService {
       this.readString(this.asObject(body.data).status) ||
       this.readString(this.asObject(body.payment).status) ||
       this.readString(this.asObject(body.payment_check).status) ||
+      (paidBoolean ? 'PAID' : '') ||
       '';
 
     const orderNsu =
@@ -983,7 +1167,7 @@ export class BillingService {
     normalized: InfinitePayWebhookNormalized,
   ) {
     if (normalized.orderNsu) {
-      console.log('[BillingService] Tentando lookup de pagamento por order_nsu:', normalized.orderNsu);
+      this.logWebhook('[InfinitePay webhook] lookup por order_nsu', normalized.orderNsu);
       const byOrderNsu = await tx.payment.findFirst({
         where: {
           gateway: BillingGateway.INFINITEPAY,
@@ -991,14 +1175,14 @@ export class BillingService {
         },
       });
       if (byOrderNsu) {
-        console.log('[BillingService] Lookup por order_nsu encontrou payment:', byOrderNsu.id);
+        this.logWebhook('[InfinitePay webhook] lookup por order_nsu encontrou payment', byOrderNsu.id);
         return byOrderNsu;
       }
     }
 
     if (normalized.transactionNsu) {
-      console.log(
-        '[BillingService] Tentando lookup de pagamento por transaction_nsu:',
+      this.logWebhook(
+        '[InfinitePay webhook] lookup por transaction_nsu',
         normalized.transactionNsu,
       );
       const byTransactionNsu = await tx.payment.findFirst({
@@ -1008,7 +1192,10 @@ export class BillingService {
         },
       });
       if (byTransactionNsu) {
-        console.log('[BillingService] Lookup por transaction_nsu encontrou payment:', byTransactionNsu.id);
+        this.logWebhook(
+          '[InfinitePay webhook] lookup por transaction_nsu encontrou payment',
+          byTransactionNsu.id,
+        );
         return byTransactionNsu;
       }
     }
@@ -1176,5 +1363,21 @@ export class BillingService {
         'webhook_url inválida para produção. Configure uma URL pública do backend.',
       );
     }
+  }
+
+  private logWebhook(message: string, payload?: unknown, isError = false) {
+    const raw = String(process.env.INFINITEPAY_WEBHOOK_DEBUG || '').trim().toLowerCase();
+    const enabled =
+      raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on' || process.env.NODE_ENV !== 'production';
+    if (!enabled) return;
+
+    if (payload === undefined) {
+      if (isError) console.error(message);
+      else console.log(message);
+      return;
+    }
+
+    if (isError) console.error(message, payload);
+    else console.log(message, payload);
   }
 }

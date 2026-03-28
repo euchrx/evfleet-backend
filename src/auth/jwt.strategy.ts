@@ -18,8 +18,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-    console.log('JWT payload:', payload);
-
     const tokenUserId = String(payload?.userId || payload?.sub || '').trim();
     if (!tokenUserId) {
       throw new UnauthorizedException('Token inválido: userId ausente.');

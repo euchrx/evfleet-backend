@@ -20,6 +20,12 @@ export type CreateInfinitePayCheckoutOutput = {
   rawResponse: unknown;
 };
 
+export type CheckInfinitePayPaymentInput = {
+  orderNsu: string;
+  transactionNsu?: string;
+  slug?: string;
+};
+
 @Injectable()
 export class InfinitePayGateway {
   constructor(private readonly configService: ConfigService) {}
@@ -147,9 +153,12 @@ export class InfinitePayGateway {
     };
   }
 
-  async checkPayment(orderNsu: string) {
+  async checkPayment(
+    input: CheckInfinitePayPaymentInput,
+    options?: { force?: boolean },
+  ) {
     const isEnabled = this.readBooleanEnv('INFINITEPAY_ENABLE_PAYMENT_CHECK');
-    if (!isEnabled) return null;
+    if (!isEnabled && !options?.force) return null;
 
     const baseUrl =
       String(this.configService.get<string>('INFINITEPAY_BASE_URL') || '').trim() ||
@@ -157,7 +166,12 @@ export class InfinitePayGateway {
     const pathTemplate =
       String(this.configService.get<string>('INFINITEPAY_PAYMENT_CHECK_PATH') || '').trim() ||
       '/invoices/public/payment_check/{order_nsu}';
+    const method =
+      String(this.configService.get<string>('INFINITEPAY_PAYMENT_CHECK_METHOD') || 'GET')
+        .trim()
+        .toUpperCase() || 'GET';
     const apiKey = String(this.configService.get<string>('INFINITEPAY_API_KEY') || '').trim();
+    const handle = String(this.configService.get<string>('INFINITEPAY_HANDLE') || '').trim();
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -166,12 +180,28 @@ export class InfinitePayGateway {
       headers.Authorization = `Bearer ${apiKey}`;
     }
 
-    const path = pathTemplate.replace('{order_nsu}', encodeURIComponent(orderNsu));
-    const response = await fetch(`${baseUrl.replace(/\/+$/, '')}${path}`, {
-      method: 'GET',
+    const path = pathTemplate.replace('{order_nsu}', encodeURIComponent(input.orderNsu));
+    const endpoint = `${baseUrl.replace(/\/+$/, '')}${path}`;
+    const payload = {
+      handle,
+      order_nsu: input.orderNsu,
+      ...(input.transactionNsu ? { transaction_nsu: input.transactionNsu } : {}),
+      ...(input.slug ? { slug: input.slug } : {}),
+    };
+
+    const response = await fetch(endpoint, {
+      method,
       headers,
+      ...(method === 'POST' ? { body: JSON.stringify(payload) } : {}),
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.warn('[InfinitePayGateway] payment_check upstream non-ok', {
+        endpoint,
+        method,
+        status: response.status,
+      });
+      return null;
+    }
 
     try {
       return await response.json();

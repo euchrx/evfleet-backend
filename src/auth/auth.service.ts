@@ -18,8 +18,6 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas');
     }
 
-    console.log('User found:', user.id);
-
     const payload = {
       userId: user.id,
       sub: user.id,

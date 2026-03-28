@@ -17,6 +17,7 @@ import { Public } from '../auth/public.decorator';
 import { AllowInadimplenteAccess } from '../auth/allow-inadimplente-access.decorator';
 import { BillingWebhookSignatureService } from './billing-webhook-signature.service';
 import { BillingService } from './billing.service';
+import { CheckPaymentDto } from './dto/check-payment.dto';
 import { CreateCompanySubscriptionDto } from './dto/create-company-subscription.dto';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { CreateSubscriptionCheckoutDto } from './dto/create-subscription-checkout.dto';
@@ -57,6 +58,14 @@ export class BillingController {
   async payMyCompany(@Req() req: any) {
     const companyId = this.requireAuthenticatedCompanyId(req);
     return this.billingService.createInitialPaymentForCompany(companyId);
+  }
+
+  @Post('check-payment')
+  async checkPayment(@Body() dto: CheckPaymentDto, @Req() req: any) {
+    return this.billingService.checkPaymentFallback(dto, {
+      companyId: req?.companyScopeId || req?.user?.companyId,
+      role: req?.user?.role,
+    });
   }
 
   @Roles('ADMIN')
@@ -173,17 +182,29 @@ export class BillingController {
     @Headers() headers: Record<string, string | string[]>,
     @Req() req: any,
   ) {
-    console.log('[BillingController] POST /billing/webhooks/infinitepay recebido');
-    console.log('[BillingController] Webhook headers:', headers);
-    console.log('[BillingController] Webhook body:', payload);
+    this.logWebhook('[InfinitePay webhook] POST recebido');
+    this.logWebhook('[InfinitePay webhook] headers', headers);
+    this.logWebhook('[InfinitePay webhook] body', payload);
 
     const rawBody =
       req?.rawBody instanceof Buffer ? req.rawBody : Buffer.from(JSON.stringify(payload ?? {}));
     this.billingWebhookSignatureService.validateOrThrow(headers, rawBody);
 
     const result = await this.billingService.handleInfinitePayWebhook(payload, headers);
-    console.log('[BillingController] Resultado processamento webhook:', result);
+    this.logWebhook('[InfinitePay webhook] resultado', result);
     return result;
+  }
+
+  private logWebhook(message: string, payload?: unknown) {
+    const raw = String(process.env.INFINITEPAY_WEBHOOK_DEBUG || '').trim().toLowerCase();
+    const enabled =
+      raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on' || process.env.NODE_ENV !== 'production';
+    if (!enabled) return;
+    if (payload === undefined) {
+      console.log(message);
+      return;
+    }
+    console.log(message, payload);
   }
 
   private assertCompanyAccess(companyId: string, req: any) {

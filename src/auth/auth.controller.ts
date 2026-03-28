@@ -28,8 +28,6 @@ export class AuthController {
   @AllowInadimplenteAccess()
   @Get('me')
   async me(@Req() req: any) {
-    console.log('req.user:', req?.user);
-
     const userId = String(req?.user?.userId || '').trim();
     if (!userId) {
       throw new UnauthorizedException('Token inválido: userId ausente.');

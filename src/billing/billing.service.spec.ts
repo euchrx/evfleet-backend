@@ -243,7 +243,7 @@ describe('BillingService Webhook', () => {
       subscriptionId: 'sub_3',
     });
     expect((service as any).infinitePayGateway.checkPayment).toHaveBeenCalledWith(
-      'order_3',
+      { orderNsu: 'order_3' },
     );
   });
 });
