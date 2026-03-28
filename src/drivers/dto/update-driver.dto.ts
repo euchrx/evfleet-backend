@@ -37,6 +37,5 @@ export class UpdateDriverDto {
 
   @IsOptional()
   @IsUUID()
-  vehicleId?: string | null;
+  vehicleId?: string;
 }
-

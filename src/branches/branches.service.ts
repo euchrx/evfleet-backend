@@ -64,31 +64,20 @@ export class BranchesService {
   }
 
   private async resolveCompanyId(inputCompanyId?: string) {
-    if (inputCompanyId) {
-      const company = await this.prisma.company.findUnique({
-        where: { id: inputCompanyId },
-        select: { id: true },
-      });
-      if (!company) {
-        throw new BadRequestException('Empresa não encontrada.');
-      }
-      return company.id;
+    const companyId = String(inputCompanyId || '').trim();
+    if (!companyId) {
+      throw new BadRequestException(
+        'companyId obrigatorio para criar filial no modo multiempresa.',
+      );
     }
 
-    const activeCompany = await this.prisma.company.findFirst({
-      where: { active: true },
-      orderBy: { createdAt: 'asc' },
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
       select: { id: true },
     });
-    if (activeCompany) return activeCompany.id;
-
-    const fallback = await this.prisma.company.create({
-      data: {
-        name: 'Empresa Padrão',
-        active: true,
-      },
-      select: { id: true },
-    });
-    return fallback.id;
+    if (!company) {
+      throw new BadRequestException('Empresa não encontrada.');
+    }
+    return company.id;
   }
 }

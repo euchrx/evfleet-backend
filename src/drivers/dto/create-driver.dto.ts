@@ -1,4 +1,10 @@
-import { IsDateString, IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import {
+  IsDateString,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+} from 'class-validator';
 
 export class CreateDriverDto {
   @IsString()
@@ -29,7 +35,6 @@ export class CreateDriverDto {
   @Length(2, 30)
   status: string;
 
-  @IsOptional()
   @IsUUID()
-  vehicleId?: string | null;
+  vehicleId: string;
 }

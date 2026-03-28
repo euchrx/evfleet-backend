@@ -75,12 +75,7 @@ export class PrismaService extends PrismaClient
       case 'Vehicle':
         return { branch: { companyId } };
       case 'Driver':
-        return {
-          OR: [
-            { vehicle: { branch: { companyId } } },
-            { vehicleId: null },
-          ],
-        };
+        return { vehicle: { branch: { companyId } } };
       case 'MaintenanceRecord':
       case 'MaintenancePlan':
       case 'Debt':

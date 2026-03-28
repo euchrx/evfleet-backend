@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req } from '@nestjs/common';
 import { BranchesService } from './branches.service';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
@@ -8,8 +8,13 @@ export class BranchesController {
   constructor(private readonly service: BranchesService) {}
 
   @Post()
-  create(@Body() dto: CreateBranchDto) {
-    return this.service.create(dto);
+  create(@Body() dto: CreateBranchDto, @Req() req: any) {
+    const companyId =
+      dto.companyId || req?.companyScopeId || req?.user?.companyId;
+    return this.service.create({
+      ...dto,
+      companyId,
+    });
   }
 
   @Get()
