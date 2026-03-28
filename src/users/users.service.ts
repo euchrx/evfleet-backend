@@ -20,6 +20,7 @@ export class UsersService {
     if (existing) throw new BadRequestException('Email já cadastrado');
 
     const passwordHash = await bcrypt.hash(data.password, 10);
+    const companyId = await this.resolveCompanyId(data.companyId);
 
     return this.prisma.user.create({
       data: {
@@ -27,6 +28,7 @@ export class UsersService {
         email: data.email,
         password: passwordHash,
         role: data.role,
+        companyId,
       },
       select: { id: true, name: true, email: true, role: true, createdAt: true },
     });
@@ -103,5 +105,34 @@ export class UsersService {
 
   async findMe(id: string) {
     return this.findOne(id);
+  }
+
+  private async resolveCompanyId(inputCompanyId?: string) {
+    if (inputCompanyId) {
+      const company = await this.prisma.company.findUnique({
+        where: { id: inputCompanyId },
+        select: { id: true },
+      });
+      if (!company) {
+        throw new BadRequestException('Empresa não encontrada.');
+      }
+      return company.id;
+    }
+
+    const activeCompany = await this.prisma.company.findFirst({
+      where: { active: true },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (activeCompany) return activeCompany.id;
+
+    const fallback = await this.prisma.company.create({
+      data: {
+        name: 'Empresa Padrão',
+        active: true,
+      },
+      select: { id: true },
+    });
+    return fallback.id;
   }
 }

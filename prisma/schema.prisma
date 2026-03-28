@@ -14,6 +14,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  document  String?
+  slug      String?  @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branches Branch[]
+  users    User[]
+  subscriptions Subscription[]
+  payments      Payment[]
+  webhookEvents WebhookEvent[]
+
+  @@index([active])
+}
+
 model Branch {
   id        String   @id @default(uuid())
   name      String
@@ -21,7 +39,12 @@ model Branch {
   state     String
   createdAt DateTime @default(now())
 
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
   vehicles Vehicle[]
+
+  @@index([companyId])
 }
 
 model Vehicle {
@@ -126,7 +149,12 @@ model User {
   role      Role     @default(BRANCH_MANAGER)
   createdAt DateTime @default(now())
 
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
   auditLogs AuditLog[]
+
+  @@index([companyId])
 }
 
 model Driver {
@@ -387,4 +415,132 @@ enum DocumentType {
   LEASING_CONTRACT
   INSPECTION
   OTHER
+}
+
+enum PlanInterval {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  EXPIRED
+  FAILED
+  REFUNDED
+  CANCELED
+}
+
+enum BillingGateway {
+  MANUAL
+  INFINITEPAY
+}
+
+enum WebhookProcessStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+model Plan {
+  id          String       @id @default(uuid())
+  code        String       @unique
+  name        String
+  description String?
+  priceCents  Int
+  currency    String       @default("BRL")
+  interval    PlanInterval
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  subscriptions Subscription[]
+
+  @@index([isActive])
+}
+
+model Subscription {
+  id                    String             @id @default(uuid())
+  status                SubscriptionStatus @default(TRIALING)
+  startedAt             DateTime           @default(now())
+  currentPeriodStart    DateTime?
+  currentPeriodEnd      DateTime?
+  nextBillingAt         DateTime?
+  trialEndsAt           DateTime?
+  canceledAt            DateTime?
+  externalCustomerId    String?
+  externalSubscriptionId String?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  planId String
+  plan   Plan @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  payments      Payment[]
+  webhookEvents WebhookEvent[]
+
+  @@index([companyId])
+  @@index([planId])
+  @@index([status])
+}
+
+model Payment {
+  id                String         @id @default(uuid())
+  gateway           BillingGateway @default(MANUAL)
+  status            PaymentStatus  @default(PENDING)
+  amountCents       Int
+  currency          String         @default("BRL")
+  dueDate           DateTime?
+  paidAt            DateTime?
+  gatewayReference  String?
+  checkoutUrl       String?
+  externalPaymentId String?
+  invoiceUrl        String?
+  metadata          Json?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([gatewayReference])
+}
+
+model WebhookEvent {
+  id               String               @id @default(uuid())
+  gateway          BillingGateway       @default(MANUAL)
+  eventType        String
+  externalEventId  String?              @unique
+  payload          Json
+  processStatus    WebhookProcessStatus @default(PENDING)
+  processedAt      DateTime?
+  errorMessage     String?
+  createdAt        DateTime             @default(now())
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([subscriptionId])
+  @@index([processStatus])
 }

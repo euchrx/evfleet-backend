@@ -4,15 +4,22 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 
 @Injectable()
 export class BranchesService {
   constructor(private prisma: PrismaService) {}
 
-  async create(data: { name: string; city: string; state: string }) {
+  async create(data: CreateBranchDto) {
+    const companyId = await this.resolveCompanyId(data.companyId);
     return this.prisma.branch.create({
-      data,
+      data: {
+        name: data.name,
+        city: data.city,
+        state: data.state,
+        companyId,
+      },
     });
   }
 
@@ -54,5 +61,34 @@ export class BranchesService {
         'Nao foi possivel excluir a filial. Verifique vinculos existentes.',
       );
     }
+  }
+
+  private async resolveCompanyId(inputCompanyId?: string) {
+    if (inputCompanyId) {
+      const company = await this.prisma.company.findUnique({
+        where: { id: inputCompanyId },
+        select: { id: true },
+      });
+      if (!company) {
+        throw new BadRequestException('Empresa não encontrada.');
+      }
+      return company.id;
+    }
+
+    const activeCompany = await this.prisma.company.findFirst({
+      where: { active: true },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (activeCompany) return activeCompany.id;
+
+    const fallback = await this.prisma.company.create({
+      data: {
+        name: 'Empresa Padrão',
+        active: true,
+      },
+      select: { id: true },
+    });
+    return fallback.id;
   }
 }

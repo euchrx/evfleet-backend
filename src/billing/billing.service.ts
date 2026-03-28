@@ -1,0 +1,843 @@
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  BillingGateway,
+  PaymentStatus,
+  PlanInterval,
+  Prisma,
+  SubscriptionStatus,
+  WebhookProcessStatus,
+} from '@prisma/client';
+import { createHash } from 'crypto';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreatePlanDto } from './dto/create-plan.dto';
+import { CreateSubscriptionCheckoutDto } from './dto/create-subscription-checkout.dto';
+import { InfinitePayGateway } from './gateways/infinitepay.gateway';
+
+type InfinitePayWebhookNormalized = {
+  dedupKey: string;
+  eventType: string;
+  paymentStatus: string;
+  orderNsu?: string;
+  transactionNsu?: string;
+  invoiceSlug?: string;
+  receiptUrl?: string;
+  subscriptionIdHint?: string;
+  companyIdHint?: string;
+  paidAt?: Date;
+  periodStart?: Date;
+  periodEnd?: Date;
+  paymentCheckEnabled?: boolean;
+  rawPayload: unknown;
+};
+
+@Injectable()
+export class BillingService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly infinitePayGateway: InfinitePayGateway,
+  ) {}
+
+  async listPlans() {
+    return this.prisma.plan.findMany({
+      orderBy: [{ isActive: 'desc' }, { priceCents: 'asc' }],
+    });
+  }
+
+  async createPlan(dto: CreatePlanDto) {
+    const code = dto.code?.trim().toUpperCase();
+    const name = dto.name?.trim();
+    const description = dto.description?.trim();
+    const currency = (dto.currency?.trim() || 'BRL').toUpperCase();
+
+    if (!name) {
+      throw new BadRequestException('Nome do plano é obrigatório.');
+    }
+    if (!code) {
+      throw new BadRequestException('Código do plano é obrigatório.');
+    }
+    if (!Number.isInteger(dto.priceCents) || dto.priceCents <= 0) {
+      throw new BadRequestException('priceCents deve ser maior que zero.');
+    }
+    if (dto.priceCents < this.getMinAmountCents()) {
+      throw new BadRequestException(this.getMinAmountErrorMessage());
+    }
+
+    const existingCode = await this.prisma.plan.findUnique({
+      where: { code },
+      select: { id: true },
+    });
+    if (existingCode) {
+      throw new BadRequestException('Código do plano já está em uso.');
+    }
+
+    try {
+      const plan = await this.prisma.plan.create({
+        data: {
+          code,
+          name,
+          description: description || null,
+          priceCents: dto.priceCents,
+          currency,
+          interval: dto.interval,
+          isActive: dto.active ?? true,
+        },
+      });
+
+      return {
+        id: plan.id,
+        code: plan.code,
+        name: plan.name,
+        description: plan.description,
+        priceCents: plan.priceCents,
+        currency: plan.currency,
+        interval: plan.interval,
+        active: plan.isActive,
+        createdAt: plan.createdAt,
+      };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new BadRequestException('Código do plano já está em uso.');
+      }
+      throw error;
+    }
+  }
+
+  async getCompanySubscription(companyId: string) {
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { companyId },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true },
+    });
+
+    if (!subscription) return null;
+
+    return {
+      id: subscription.id,
+      status: subscription.status,
+      currentPeriodStart: subscription.currentPeriodStart,
+      currentPeriodEnd: subscription.currentPeriodEnd,
+      nextBillingAt: subscription.nextBillingAt,
+      plan: {
+        id: subscription.plan.id,
+        code: subscription.plan.code,
+        name: subscription.plan.name,
+        priceCents: subscription.plan.priceCents,
+        currency: subscription.plan.currency,
+        interval: subscription.plan.interval,
+      },
+    };
+  }
+
+  async getCompanyPayments(companyId: string) {
+    const payments = await this.prisma.payment.findMany({
+      where: { companyId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        amountCents: true,
+        currency: true,
+        status: true,
+        dueDate: true,
+        paidAt: true,
+        checkoutUrl: true,
+      },
+    });
+
+    return payments.map((payment) => ({
+      id: payment.id,
+      amount: payment.amountCents,
+      currency: payment.currency,
+      status: payment.status,
+      dueAt: payment.dueDate,
+      paidAt: payment.paidAt,
+      checkoutUrl: payment.checkoutUrl,
+    }));
+  }
+
+  async createSubscriptionForCompany(companyId: string, planId: string) {
+    const now = new Date();
+    const currentPeriodEnd = this.addDays(now, 30);
+
+    return this.prisma.$transaction(async (tx) => {
+      const company = await tx.company.findUnique({
+        where: { id: companyId },
+        select: { id: true, active: true },
+      });
+      if (!company) {
+        throw new NotFoundException('Empresa não encontrada.');
+      }
+      if (!company.active) {
+        throw new BadRequestException('Empresa inativa não pode receber assinatura.');
+      }
+
+      const existing = await tx.subscription.findFirst({
+        where: {
+          companyId,
+          status: {
+            in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING],
+          },
+        },
+        select: { id: true, status: true },
+      });
+      if (existing) {
+        throw new BadRequestException(
+          `A empresa já possui assinatura ${existing.status}.`,
+        );
+      }
+
+      const plan = await tx.plan.findUnique({
+        where: { id: planId },
+        select: { id: true, isActive: true },
+      });
+      if (!plan) {
+        throw new NotFoundException('Plano não encontrado.');
+      }
+      if (!plan.isActive) {
+        throw new BadRequestException('Plano inativo não pode ser utilizado.');
+      }
+
+      return tx.subscription.create({
+        data: {
+          companyId,
+          planId: plan.id,
+          status: SubscriptionStatus.TRIALING,
+          currentPeriodStart: now,
+          currentPeriodEnd,
+          nextBillingAt: currentPeriodEnd,
+        },
+        include: { plan: true },
+      });
+    });
+  }
+
+  async createCheckoutForSubscription(
+    subscriptionId: string,
+    input: CreateSubscriptionCheckoutDto,
+    companyId?: string,
+  ) {
+    const subscription = await this.prisma.subscription.findUnique({
+      where: { id: subscriptionId },
+      include: {
+        plan: true,
+        company: true,
+      },
+    });
+
+    if (!subscription) {
+      throw new NotFoundException('Assinatura não encontrada.');
+    }
+
+    if (companyId && subscription.companyId !== companyId) {
+      throw new BadRequestException('Assinatura não pertence à empresa informada.');
+    }
+
+    const amountCents = Number(input.amountCents || subscription.plan.priceCents || 0);
+    this.validateMinimumAmountOrThrow(amountCents);
+    const description = input.description?.trim() || `Assinatura ${subscription.plan.name}`;
+    const orderNsu = `sub_${subscription.id}_${Date.now()}`;
+
+    const checkout = await this.infinitePayGateway.createCheckoutLink({
+      amountCents,
+      currency: subscription.plan.currency,
+      description,
+      orderNsu,
+      redirectUrl: input.redirectUrl,
+      webhookUrl: input.webhookUrl,
+      customer: input.customer || this.buildInfinitePayCustomer(subscription.company),
+    });
+
+    const safeResponse =
+      checkout.rawResponse === undefined
+        ? null
+        : (JSON.parse(JSON.stringify(checkout.rawResponse)) as Prisma.InputJsonValue);
+
+    const payment = await this.prisma.payment.create({
+      data: {
+        gateway: BillingGateway.INFINITEPAY,
+        status: PaymentStatus.PENDING,
+        amountCents,
+        currency: subscription.plan.currency,
+        gatewayReference: checkout.gatewayReference,
+        externalPaymentId: checkout.transactionNsu || null,
+        invoiceUrl: checkout.receiptUrl || null,
+        checkoutUrl: checkout.checkoutUrl,
+        metadata: {
+          provider: 'INFINITEPAY',
+          order_nsu: checkout.gatewayReference,
+          invoice_slug: checkout.invoiceSlug || null,
+          transaction_nsu: checkout.transactionNsu || null,
+          request: {
+            handleSource: 'INFINITEPAY_HANDLE',
+            amountCents,
+            currency: subscription.plan.currency,
+            description,
+            order_nsu: orderNsu,
+          },
+          response: safeResponse,
+        },
+        companyId: subscription.companyId,
+        subscriptionId: subscription.id,
+      },
+    });
+
+    return {
+      subscriptionId: subscription.id,
+      paymentId: payment.id,
+      gateway: payment.gateway,
+      status: payment.status,
+      amountCents: payment.amountCents,
+      gatewayReference: payment.gatewayReference,
+      transactionNsu: payment.externalPaymentId,
+      checkoutUrl: payment.checkoutUrl,
+    };
+  }
+
+  async createInitialPaymentForSubscription(subscriptionId: string, companyId?: string) {
+    const subscription = await this.prisma.subscription.findUnique({
+      where: { id: subscriptionId },
+      include: {
+        plan: true,
+      },
+    });
+
+    if (!subscription) {
+      throw new NotFoundException('Assinatura não encontrada.');
+    }
+
+    if (companyId && subscription.companyId !== companyId) {
+      throw new BadRequestException('Assinatura não pertence à empresa informada.');
+    }
+
+    const amountCents = Number(subscription.plan.priceCents || 0);
+    this.validateMinimumAmountOrThrow(amountCents);
+    const dueDate = subscription.nextBillingAt ?? this.addDays(new Date(), 30);
+    const orderNsu = `initial_sub_${subscription.id}_${Date.now()}`;
+    const description = `Primeiro pagamento da assinatura ${subscription.plan.name}`;
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: subscription.companyId },
+      select: { id: true, name: true, document: true },
+    });
+
+    const payment = await this.prisma.payment.create({
+      data: {
+        gateway: BillingGateway.INFINITEPAY,
+        status: PaymentStatus.PENDING,
+        amountCents,
+        currency: subscription.plan.currency,
+        dueDate,
+        companyId: subscription.companyId,
+        subscriptionId: subscription.id,
+        metadata: {
+          provider: 'INFINITEPAY',
+          type: 'INITIAL_SUBSCRIPTION_PAYMENT',
+          order_nsu: orderNsu,
+          request: {
+            amountCents,
+            currency: subscription.plan.currency,
+            description,
+            order_nsu: orderNsu,
+          },
+        },
+      },
+    });
+
+    try {
+      const checkout = await this.infinitePayGateway.createCheckoutLink({
+        amountCents,
+        currency: subscription.plan.currency,
+        description,
+        orderNsu,
+        customer: company ? this.buildInfinitePayCustomer(company) : undefined,
+      });
+
+      const safeResponse =
+        checkout.rawResponse === undefined
+          ? null
+          : (JSON.parse(JSON.stringify(checkout.rawResponse)) as Prisma.InputJsonValue);
+
+      const updatedPayment = await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          gatewayReference: checkout.gatewayReference,
+          externalPaymentId: checkout.transactionNsu || null,
+          invoiceUrl: checkout.receiptUrl || null,
+          checkoutUrl: checkout.checkoutUrl,
+          metadata: {
+            ...(payment.metadata && typeof payment.metadata === 'object' ? payment.metadata : {}),
+            order_nsu: checkout.gatewayReference,
+            invoice_slug: checkout.invoiceSlug || null,
+            transaction_nsu: checkout.transactionNsu || null,
+            response: safeResponse,
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      return {
+        paymentId: updatedPayment.id,
+        subscriptionId: updatedPayment.subscriptionId,
+        companyId: updatedPayment.companyId,
+        amountCents: updatedPayment.amountCents,
+        dueDate: updatedPayment.dueDate,
+        checkoutUrl: updatedPayment.checkoutUrl,
+      };
+    } catch (error) {
+      await this.prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: PaymentStatus.FAILED,
+          metadata: {
+            ...(payment.metadata && typeof payment.metadata === 'object' ? payment.metadata : {}),
+            gatewayError: this.getErrorMessage(error),
+          } as Prisma.InputJsonValue,
+        },
+      });
+      throw error;
+    }
+  }
+
+  async handleInfinitePayWebhook(payload: unknown, headers?: Record<string, string | string[]>) {
+    const normalized = this.normalizeInfinitePayWebhookPayload(payload, headers);
+    const companyIdForEvent = await this.resolveWebhookCompanyId(normalized);
+
+    let webhookEvent: { id: string } | null = null;
+    try {
+      webhookEvent = await this.prisma.webhookEvent.create({
+        data: {
+          gateway: BillingGateway.INFINITEPAY,
+          eventType: normalized.eventType,
+          externalEventId: normalized.dedupKey,
+          payload: this.toInputJson(normalized.rawPayload),
+          processStatus: WebhookProcessStatus.PENDING,
+          ...(companyIdForEvent ? { companyId: companyIdForEvent } : {}),
+        },
+        select: { id: true },
+      });
+    } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        return {
+          duplicate: true,
+          message: 'Evento duplicado ignorado com segurança.',
+        };
+      }
+      throw error;
+    }
+
+    let paymentStatus = normalized.paymentStatus;
+    if (
+      !this.isPaymentConfirmedStatus(paymentStatus) &&
+      normalized.paymentCheckEnabled &&
+      normalized.orderNsu
+    ) {
+      const paymentCheckPayload = await this.infinitePayGateway.checkPayment(normalized.orderNsu);
+      const paymentCheckStatus = this.extractPaymentCheckStatus(paymentCheckPayload);
+      if (paymentCheckStatus) {
+        paymentStatus = paymentCheckStatus;
+      }
+    }
+
+    if (!this.isPaymentConfirmedStatus(paymentStatus)) {
+      await this.prisma.webhookEvent.update({
+        where: { id: webhookEvent.id },
+        data: {
+          processStatus: WebhookProcessStatus.PROCESSED,
+          processedAt: new Date(),
+          ...(companyIdForEvent ? { companyId: companyIdForEvent } : {}),
+        },
+      });
+      return {
+        duplicate: false,
+        processed: true,
+        message: `Evento ${normalized.eventType} sem confirmação de pagamento.`,
+      };
+    }
+
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const payment = await this.findPaymentByWebhookReference(tx, normalized);
+        if (!payment) {
+          throw new NotFoundException('Pagamento não encontrado para o webhook recebido.');
+        }
+
+        const paidAt = normalized.paidAt ?? new Date();
+
+        const updatedPayment = await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: PaymentStatus.PAID,
+            paidAt,
+            ...(normalized.transactionNsu
+              ? { externalPaymentId: normalized.transactionNsu }
+              : {}),
+            ...(normalized.orderNsu
+              ? { gatewayReference: normalized.orderNsu }
+              : {}),
+            ...(normalized.receiptUrl ? { invoiceUrl: normalized.receiptUrl } : {}),
+            metadata: {
+              ...(payment.metadata && typeof payment.metadata === 'object'
+                ? payment.metadata
+                : {}),
+              ...(normalized.invoiceSlug ? { invoice_slug: normalized.invoiceSlug } : {}),
+              ...(normalized.transactionNsu
+                ? { transaction_nsu: normalized.transactionNsu }
+                : {}),
+            } as Prisma.InputJsonValue,
+          },
+          include: {
+            subscription: {
+              include: {
+                plan: true,
+              },
+            },
+          },
+        });
+
+        const periodStart = normalized.periodStart ?? paidAt;
+        const periodEnd =
+          normalized.periodEnd ??
+          this.computePeriodEnd(periodStart, updatedPayment.subscription.plan.interval);
+
+        const updatedSubscription = await tx.subscription.update({
+          where: { id: updatedPayment.subscriptionId },
+          data: {
+            status: SubscriptionStatus.ACTIVE,
+            currentPeriodStart: periodStart,
+            currentPeriodEnd: periodEnd,
+            nextBillingAt: periodEnd,
+          },
+        });
+
+        await tx.webhookEvent.update({
+          where: { id: webhookEvent!.id },
+          data: {
+            companyId: updatedPayment.companyId,
+            subscriptionId: updatedPayment.subscriptionId,
+            processStatus: WebhookProcessStatus.PROCESSED,
+            processedAt: new Date(),
+          },
+        });
+
+        return {
+          paymentId: updatedPayment.id,
+          subscriptionId: updatedSubscription.id,
+        };
+      });
+
+      return {
+        duplicate: false,
+        processed: true,
+        ...result,
+      };
+    } catch (error) {
+      await this.prisma.webhookEvent.update({
+        where: { id: webhookEvent.id },
+        data: {
+          processStatus: WebhookProcessStatus.FAILED,
+          errorMessage: this.getErrorMessage(error),
+        },
+      });
+      throw new InternalServerErrorException('Falha ao processar webhook de billing.');
+    }
+  }
+
+  private normalizeInfinitePayWebhookPayload(
+    payload: unknown,
+    headers?: Record<string, string | string[]>,
+  ): InfinitePayWebhookNormalized {
+    const body = this.asObject(payload);
+    const headerEventId = this.readHeader(headers, 'x-event-id');
+    const eventId =
+      this.readString(body.eventId) ||
+      this.readString(body.event_id) ||
+      this.readString(body.id) ||
+      headerEventId;
+
+    const eventType =
+      this.readString(body.type) ||
+      this.readString(body.event) ||
+      this.readString(body.eventType) ||
+      'UNKNOWN';
+
+    const paymentStatus =
+      this.readString(body.status) ||
+      this.readString(body.paymentStatus) ||
+      this.readString(body.capture_method) ||
+      this.readString(this.asObject(body.data).status) ||
+      this.readString(this.asObject(body.payment).status) ||
+      this.readString(this.asObject(body.payment_check).status) ||
+      '';
+
+    const orderNsu =
+      this.readString(body.order_nsu) ||
+      this.readString(this.asObject(body.data).order_nsu) ||
+      this.readString(this.asObject(body.payment).order_nsu) ||
+      this.readString(this.asObject(body.metadata).order_nsu) ||
+      this.readString(this.asObject(body.data).reference) ||
+      this.readString(this.asObject(body.payment).reference) ||
+      this.readString(body.reference);
+
+    const transactionNsu =
+      this.readString(body.transaction_nsu) ||
+      this.readString(this.asObject(body.data).transaction_nsu) ||
+      this.readString(this.asObject(body.payment).transaction_nsu) ||
+      this.readString(this.asObject(body.data).paymentId) ||
+      this.readString(this.asObject(body.payment).id) ||
+      this.readString(body.paymentId);
+
+    const invoiceSlug =
+      this.readString(body.invoice_slug) ||
+      this.readString(this.asObject(body.data).invoice_slug) ||
+      this.readString(this.asObject(body.metadata).invoice_slug);
+
+    const receiptUrl =
+      this.readString(body.receipt_url) ||
+      this.readString(this.asObject(body.data).receipt_url) ||
+      this.readString(this.asObject(body.payment).receipt_url);
+
+    const subscriptionIdHint =
+      this.readString(this.asObject(body.metadata).subscriptionId) ||
+      this.readString(body.subscriptionId);
+
+    const companyIdHint =
+      this.readString(this.asObject(body.metadata).companyId) ||
+      this.readString(body.companyId) ||
+      this.readString(this.asObject(body.company).id);
+
+    const paidAt = this.readDate(
+      this.readString(body.paid_at) ||
+        this.readString(body.paidAt) ||
+        this.readString(this.asObject(body.data).paid_at) ||
+        this.readString(this.asObject(body.data).paidAt) ||
+        this.readString(this.asObject(body.payment).paidAt) ||
+        this.readString(body.paidAt),
+    );
+
+    const periodStart = this.readDate(
+      this.readString(this.asObject(body.data).periodStart) ||
+        this.readString(this.asObject(body.data).currentPeriodStart),
+    );
+    const periodEnd = this.readDate(
+      this.readString(this.asObject(body.data).periodEnd) ||
+        this.readString(this.asObject(body.data).currentPeriodEnd),
+    );
+
+    const dedupKey = eventId || this.hashPayload(body);
+    const paymentCheckEnabled = this.readBoolean(
+      body.payment_check ||
+        this.asObject(body.payment_check).enabled ||
+        this.asObject(body.metadata).payment_check,
+    );
+
+    return {
+      dedupKey,
+      eventType,
+      paymentStatus,
+      orderNsu,
+      transactionNsu,
+      invoiceSlug,
+      receiptUrl,
+      subscriptionIdHint,
+      companyIdHint,
+      paidAt,
+      periodStart,
+      periodEnd,
+      paymentCheckEnabled,
+      rawPayload: body,
+    };
+  }
+
+  private async resolveWebhookCompanyId(normalized: InfinitePayWebhookNormalized) {
+    if (normalized.companyIdHint) return normalized.companyIdHint;
+
+    if (normalized.subscriptionIdHint) {
+      const subscription = await this.prisma.subscription.findUnique({
+        where: { id: normalized.subscriptionIdHint },
+        select: { companyId: true },
+      });
+      if (subscription?.companyId) return subscription.companyId;
+    }
+
+    if (normalized.orderNsu) {
+      const payment = await this.prisma.payment.findFirst({
+        where: { gateway: BillingGateway.INFINITEPAY, gatewayReference: normalized.orderNsu },
+        select: { companyId: true },
+      });
+      if (payment?.companyId) return payment.companyId;
+    }
+
+    if (normalized.transactionNsu) {
+      const payment = await this.prisma.payment.findFirst({
+        where: { gateway: BillingGateway.INFINITEPAY, externalPaymentId: normalized.transactionNsu },
+        select: { companyId: true },
+      });
+      if (payment?.companyId) return payment.companyId;
+    }
+
+    return undefined;
+  }
+
+  private async findPaymentByWebhookReference(
+    tx: Prisma.TransactionClient,
+    normalized: InfinitePayWebhookNormalized,
+  ) {
+    if (normalized.orderNsu) {
+      const byOrderNsu = await tx.payment.findFirst({
+        where: {
+          gateway: BillingGateway.INFINITEPAY,
+          gatewayReference: normalized.orderNsu,
+        },
+      });
+      if (byOrderNsu) return byOrderNsu;
+    }
+
+    if (normalized.transactionNsu) {
+      const byTransactionNsu = await tx.payment.findFirst({
+        where: {
+          gateway: BillingGateway.INFINITEPAY,
+          externalPaymentId: normalized.transactionNsu,
+        },
+      });
+      if (byTransactionNsu) return byTransactionNsu;
+    }
+
+    if (normalized.subscriptionIdHint) {
+      return tx.payment.findFirst({
+        where: {
+          gateway: BillingGateway.INFINITEPAY,
+          subscriptionId: normalized.subscriptionIdHint,
+          status: PaymentStatus.PENDING,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
+
+    return null;
+  }
+
+  private computePeriodEnd(periodStart: Date, interval: PlanInterval) {
+    const end = new Date(periodStart);
+    if (interval === PlanInterval.YEARLY) {
+      end.setFullYear(end.getFullYear() + 1);
+      return end;
+    }
+    end.setMonth(end.getMonth() + 1);
+    return end;
+  }
+
+  private isPaymentConfirmedStatus(status: string) {
+    const normalized = String(status || '').trim().toUpperCase();
+    return ['PAID', 'APPROVED', 'CONFIRMED', 'SUCCEEDED', 'SUCCESS'].includes(normalized);
+  }
+
+  private extractPaymentCheckStatus(payload: unknown) {
+    const body = this.asObject(payload);
+    return (
+      this.readString(body.status) ||
+      this.readString(this.asObject(body.data).status) ||
+      this.readString(this.asObject(body.payment).status) ||
+      ''
+    );
+  }
+
+  private buildInfinitePayCustomer(company?: {
+    name?: string | null;
+    document?: string | null;
+  }) {
+    if (!company) return undefined;
+    return {
+      name: company.name || undefined,
+      document: company.document || undefined,
+    };
+  }
+
+  private isUniqueConstraintError(error: unknown) {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: string }).code === 'P2002'
+    );
+  }
+
+  private readHeader(headers: Record<string, string | string[]> | undefined, key: string) {
+    if (!headers) return '';
+    const value = headers[key] ?? headers[key.toLowerCase()] ?? headers[key.toUpperCase()];
+    if (Array.isArray(value)) return String(value[0] || '').trim();
+    return String(value || '').trim();
+  }
+
+  private readDate(value?: string) {
+    if (!value) return undefined;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return undefined;
+    return parsed;
+  }
+
+  private readString(value: unknown) {
+    if (typeof value !== 'string') return '';
+    return value.trim();
+  }
+
+  private readBoolean(value: unknown) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value === 1;
+    if (typeof value !== 'string') return false;
+    const normalized = value.trim().toLowerCase();
+    return ['1', 'true', 'yes', 'on'].includes(normalized);
+  }
+
+  private asObject(value: unknown): Record<string, any> {
+    if (!value || typeof value !== 'object') return {};
+    return value as Record<string, any>;
+  }
+
+  private hashPayload(payload: unknown) {
+    const raw = JSON.stringify(payload || {});
+    return `hash_${createHash('sha256').update(raw).digest('hex')}`;
+  }
+
+  private addDays(date: Date, days: number) {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
+  }
+
+  private getErrorMessage(error: unknown) {
+    if (error instanceof Error) return error.message;
+    return 'Erro desconhecido ao processar webhook.';
+  }
+
+  private toInputJson(value: unknown): Prisma.InputJsonValue {
+    return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
+  }
+
+  private validateMinimumAmountOrThrow(amountCents: number) {
+    if (!Number.isFinite(amountCents) || amountCents < this.getMinAmountCents()) {
+      throw new BadRequestException(this.getMinAmountErrorMessage());
+    }
+  }
+
+  private getMinAmountCents() {
+    const raw = Number(process.env.INFINITEPAY_MIN_AMOUNT_CENTS ?? 100);
+    if (!Number.isFinite(raw) || raw <= 0) return 100;
+    return Math.floor(raw);
+  }
+
+  private getMinAmountErrorMessage() {
+    const min = this.getMinAmountCents();
+    const value = (min / 100).toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      minimumFractionDigits: 2,
+    });
+    return `Valor mínimo para pagamento é ${value}`;
+  }
+}

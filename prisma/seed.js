@@ -13,6 +13,16 @@ async function main() {
   }
 
   const password = await bcrypt.hash(plainPassword, 10);
+  const company = await prisma.company.upsert({
+    where: { slug: 'empresa-padrao' },
+    update: { active: true },
+    create: {
+      name: 'Empresa Padrão',
+      slug: 'empresa-padrao',
+      active: true,
+    },
+    select: { id: true },
+  });
 
   const user = await prisma.user.upsert({
     where: { email },
@@ -20,12 +30,14 @@ async function main() {
       name,
       password,
       role: 'ADMIN',
+      companyId: company.id,
     },
     create: {
       name,
       email,
       password,
       role: 'ADMIN',
+      companyId: company.id,
     },
     select: {
       id: true,

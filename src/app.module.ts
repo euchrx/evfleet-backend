@@ -1,32 +1,36 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { PrismaModule } from './prisma/prisma.module';
-import { VehiclesModule } from './vehicles/vehicles.module';
-import { BranchesModule } from './branches/branches.module';
-import { UsersModule } from './users/users.module';
-import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
-import { DriversModule } from './drivers/drivers.module';
-import { MaintenanceRecordsModule } from './maintenance-records/maintenance-records.module';
-import { ReportsModule } from './reports/reports.module';
+import { SubscriptionAccessGuard } from './auth/subscription-access.guard';
+import { BillingModule } from './billing/billing.module';
+import { BranchesModule } from './branches/branches.module';
+import { CompaniesModule } from './companies/companies.module';
 import { DebtsModule } from './debts/debts.module';
+import { DriversModule } from './drivers/drivers.module';
 import { FuelRecordsModule } from './fuel-records/fuel-records.module';
 import { MaintenancePlansModule } from './maintenance-plans/maintenance-plans.module';
-import { TripsModule } from './trips/trips.module';
-import { VehicleDocumentsModule } from './vehicle-documents/vehicle-documents.module';
-import { TiresModule } from './tires/tires.module';
+import { MaintenanceRecordsModule } from './maintenance-records/maintenance-records.module';
 import { MenuVisibilityModule } from './menu-visibility/menu-visibility.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { ReportsModule } from './reports/reports.module';
 import { SystemResetModule } from './system-reset/system-reset.module';
+import { TiresModule } from './tires/tires.module';
+import { TripsModule } from './trips/trips.module';
+import { UsersModule } from './users/users.module';
+import { VehicleDocumentsModule } from './vehicle-documents/vehicle-documents.module';
+import { VehiclesModule } from './vehicles/vehicles.module';
 
 @Module({
   imports: [
     PrismaModule,
     VehiclesModule,
     BranchesModule,
+    CompaniesModule,
     UsersModule,
     AuthModule,
     DriversModule,
@@ -40,13 +44,15 @@ import { SystemResetModule } from './system-reset/system-reset.module';
     TiresModule,
     MenuVisibilityModule,
     SystemResetModule,
+    BillingModule,
     ConfigModule.forRoot({ isGlobal: true }),
   ],
   controllers: [AppController],
   providers: [
     AppService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
-    { provide: APP_GUARD, useClass: RolesGuard }, // ✅ guard global
+    { provide: APP_GUARD, useClass: SubscriptionAccessGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
-export class AppModule { }
+export class AppModule {}

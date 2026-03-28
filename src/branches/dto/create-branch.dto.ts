@@ -1,4 +1,4 @@
-import { IsString, Length } from 'class-validator';
+import { IsOptional, IsString, IsUUID, Length } from 'class-validator';
 
 export class CreateBranchDto {
   @IsString()
@@ -12,4 +12,8 @@ export class CreateBranchDto {
   @IsString()
   @Length(2, 2)
   state: string; // "PR"
+
+  @IsOptional()
+  @IsUUID()
+  companyId?: string;
 }
