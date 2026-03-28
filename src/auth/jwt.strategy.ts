@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor() {
+  constructor(private readonly usersService: UsersService) {
     const secret = process.env.JWT_SECRET;
     if (!secret) {
       throw new Error('JWT_SECRET não definido no .env');
@@ -12,16 +13,28 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      secretOrKey: secret, // ✅ agora é string garantida
+      secretOrKey: secret,
     });
   }
 
-  validate(payload: any) {
+  async validate(payload: any) {
+    console.log('JWT payload:', payload);
+
+    const tokenUserId = String(payload?.userId || payload?.sub || '').trim();
+    if (!tokenUserId) {
+      throw new UnauthorizedException('Token inválido: userId ausente.');
+    }
+
+    const user = await this.usersService.findByIdForAuth(tokenUserId);
+    if (!user) {
+      throw new UnauthorizedException('Usuário do token não encontrado.');
+    }
+
     return {
-      userId: payload.sub,
-      role: payload.role,
-      email: payload.email,
-      companyId: payload.companyId,
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      companyId: user.companyId,
     };
   }
 }

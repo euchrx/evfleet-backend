@@ -1,10 +1,11 @@
-﻿import {
+import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
@@ -131,8 +132,38 @@ export class UsersService {
     });
   }
 
+  async findByIdForAuth(id: string) {
+    const userId = String(id || '').trim();
+    if (!userId) return null;
+
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        companyId: true,
+      },
+    });
+  }
+
   async findMe(id: string) {
-    return this.findOne(id);
+    const authUser = await this.findByIdForAuth(id);
+    if (!authUser) {
+      throw new UnauthorizedException('Usuário autenticado não encontrado.');
+    }
+
+    return this.prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        createdAt: true,
+        companyId: true,
+      },
+    });
   }
 
   private async resolveCompanyId(inputCompanyId?: string) {

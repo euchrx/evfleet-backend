@@ -1,14 +1,16 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
   Req,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { AllowInadimplenteAccess } from '../auth/allow-inadimplente-access.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { CompaniesService } from './companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
@@ -25,14 +27,27 @@ export class CompaniesController {
   }
 
   @Get('me')
-  findCurrent(@Req() req: any) {
-    const companyId = (req?.user?.companyId as string | undefined)?.trim();
+  @AllowInadimplenteAccess()
+  async findCurrent(@Req() req: any) {
+    console.log('companyId:', req?.user?.companyId);
+
+    const companyId = String(req?.user?.companyId || '').trim();
     if (!companyId) {
-      throw new BadRequestException(
+      throw new UnauthorizedException(
         'Usuário autenticado sem companyId. Vincule o usuário a uma empresa.',
       );
     }
-    return this.companiesService.findOne(companyId);
+
+    try {
+      return await this.companiesService.findOne(companyId);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new UnauthorizedException(
+          'Empresa não encontrada para usuário autenticado',
+        );
+      }
+      throw error;
+    }
   }
 
   @Get(':id')
