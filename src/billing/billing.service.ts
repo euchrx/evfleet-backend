@@ -579,6 +579,53 @@ export class BillingService {
     };
   }
 
+  async activateCompanySubscription(companyId: string) {
+    if (!companyId?.trim()) {
+      throw new BadRequestException('companyId é obrigatório.');
+    }
+
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { companyId },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      include: { plan: true },
+    });
+
+    if (!subscription) {
+      throw new NotFoundException('Nenhuma assinatura encontrada para a empresa.');
+    }
+
+    const now = new Date();
+    const periodEnd = this.computePeriodEnd(now, subscription.plan.interval);
+    const updated = await this.prisma.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        status: SubscriptionStatus.ACTIVE,
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
+        nextBillingAt: periodEnd,
+        canceledAt: null,
+      },
+      include: { plan: true },
+    });
+
+    return {
+      id: updated.id,
+      companyId: updated.companyId,
+      status: updated.status,
+      currentPeriodStart: updated.currentPeriodStart,
+      currentPeriodEnd: updated.currentPeriodEnd,
+      nextBillingAt: updated.nextBillingAt,
+      plan: {
+        id: updated.plan.id,
+        code: updated.plan.code,
+        name: updated.plan.name,
+        priceCents: updated.plan.priceCents,
+        currency: updated.plan.currency,
+        interval: updated.plan.interval,
+      },
+    };
+  }
+
   async handleInfinitePayWebhook(payload: unknown, headers?: Record<string, string | string[]>) {
     const normalized = this.normalizeInfinitePayWebhookPayload(payload, headers);
     const companyIdForEvent = await this.resolveWebhookCompanyId(normalized);

@@ -117,6 +117,12 @@ export class BillingController {
   }
 
   @Roles('ADMIN')
+  @Post('companies/:companyId/subscription/activate')
+  async activateCompanySubscription(@Param('companyId') companyId: string) {
+    return this.billingService.activateCompanySubscription(companyId);
+  }
+
+  @Roles('ADMIN')
   @Post('subscriptions/:subscriptionId/pay')
   async createInitialPaymentForSubscription(
     @Param('subscriptionId') subscriptionId: string,
