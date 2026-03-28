@@ -3,6 +3,37 @@ const bcrypt = require('bcrypt');
 
 const prisma = new PrismaClient();
 
+async function resolveCompanyId() {
+  const preferredCompanySlug = (process.env.MASTER_ADMIN_COMPANY_SLUG || '').trim();
+
+  if (preferredCompanySlug) {
+    const preferredCompany = await prisma.company.findUnique({
+      where: { slug: preferredCompanySlug },
+      select: { id: true },
+    });
+    if (preferredCompany) return preferredCompany.id;
+  }
+
+  const firstActiveCompany = await prisma.company.findFirst({
+    where: { active: true },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  if (firstActiveCompany) return firstActiveCompany.id;
+
+  const createdDefault = await prisma.company.create({
+    data: {
+      name: 'Empresa Padrao',
+      slug: 'empresa-padrao',
+      active: true,
+    },
+    select: { id: true },
+  });
+
+  console.log('[seed] No active company found. Default company created.');
+  return createdDefault.id;
+}
+
 async function main() {
   const email = (process.env.MASTER_ADMIN_EMAIL || 'admin@evfleet.com.br').trim();
   const name = (process.env.MASTER_ADMIN_NAME || 'Master Admin').trim();
@@ -13,16 +44,7 @@ async function main() {
   }
 
   const password = await bcrypt.hash(plainPassword, 10);
-  const company = await prisma.company.upsert({
-    where: { slug: 'empresa-padrao' },
-    update: { active: true },
-    create: {
-      name: 'Empresa Padrão',
-      slug: 'empresa-padrao',
-      active: true,
-    },
-    select: { id: true },
-  });
+  const companyId = await resolveCompanyId();
 
   const user = await prisma.user.upsert({
     where: { email },
@@ -30,20 +52,21 @@ async function main() {
       name,
       password,
       role: 'ADMIN',
-      companyId: company.id,
+      companyId,
     },
     create: {
       name,
       email,
       password,
       role: 'ADMIN',
-      companyId: company.id,
+      companyId,
     },
     select: {
       id: true,
       name: true,
       email: true,
       role: true,
+      companyId: true,
       createdAt: true,
     },
   });
@@ -52,6 +75,7 @@ async function main() {
     id: user.id,
     email: user.email,
     role: user.role,
+    companyId: user.companyId,
   });
 }
 
