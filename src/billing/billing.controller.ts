@@ -36,7 +36,8 @@ export class BillingController {
   @Roles('ADMIN')
   @Get('subscription')
   async getCompanySubscription(@Query('companyId') companyId?: string, @Req() req?: any) {
-    const resolvedCompanyId = companyId || req?.user?.companyId;
+    const isAdmin = req?.user?.role === 'ADMIN';
+    const resolvedCompanyId = companyId || req?.companyScopeId || (isAdmin ? undefined : req?.user?.companyId);
     if (!resolvedCompanyId) return null;
     this.assertCompanyAccess(resolvedCompanyId, req);
     return this.billingService.getCompanySubscription(resolvedCompanyId);
@@ -106,6 +107,8 @@ export class BillingController {
 
   private assertCompanyAccess(companyId: string, req: any) {
     const authenticatedCompanyId = req?.user?.companyId as string | undefined;
+    const role = req?.user?.role as string | undefined;
+    if (role === 'ADMIN') return;
     if (authenticatedCompanyId && authenticatedCompanyId !== companyId) {
       throw new ForbiddenException('Acesso negado para dados de outra empresa.');
     }

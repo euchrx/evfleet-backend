@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
 } from '@nestjs/common';
 import { Roles } from '../auth/roles.decorator';
 import { CompaniesService } from './companies.service';
@@ -20,6 +21,11 @@ export class CompaniesController {
   @Roles('ADMIN')
   findAll() {
     return this.companiesService.findAll();
+  }
+
+  @Get('me')
+  findCurrent(@Req() req: any) {
+    return this.companiesService.findOne(req.user.companyId);
   }
 
   @Get(':id')
