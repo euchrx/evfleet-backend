@@ -1514,18 +1514,8 @@ export class BillingService {
   }
 
   private logWebhook(message: string, payload?: unknown, isError = false) {
-    const raw = String(process.env.INFINITEPAY_WEBHOOK_DEBUG || '').trim().toLowerCase();
-    const enabled =
-      raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on' || process.env.NODE_ENV !== 'production';
-    if (!enabled) return;
-
-    if (payload === undefined) {
-      if (isError) console.error(message);
-      else console.log(message);
-      return;
-    }
-
-    if (isError) console.error(message, payload);
-    else console.log(message, payload);
+    void message;
+    void payload;
+    void isError;
   }
 }

@@ -88,7 +88,6 @@ export class InfinitePayGateway {
     }
 
     const endpoint = `${baseUrl.replace(/\/+$/, '')}/invoices/public/checkout/links`;
-    console.log('[InfinitePay] payload:', payload);
     const response = await fetch(
       endpoint,
       {
@@ -203,11 +202,7 @@ export class InfinitePayGateway {
       ...(input.slug ? { slug: input.slug } : {}),
     };
 
-    this.logDiagnostic('[InfinitePayGateway] payment_check request', {
-      endpoint,
-      method,
-      payload,
-    });
+    this.logDiagnostic('[InfinitePayGateway] payment_check request', { endpoint, method, payload });
 
     const response = await fetch(endpoint, {
       method,
@@ -232,12 +227,6 @@ export class InfinitePayGateway {
     });
 
     if (!response.ok) {
-      console.warn('[InfinitePayGateway] payment_check upstream non-ok', {
-        endpoint,
-        method,
-        status: response.status,
-        body: rawBody || parsedBody,
-      });
       return null;
     }
 
@@ -245,15 +234,8 @@ export class InfinitePayGateway {
   }
 
   private logDiagnostic(message: string, payload?: unknown) {
-    const enabled =
-      this.readBooleanEnv('INFINITEPAY_WEBHOOK_DEBUG') ||
-      this.readBooleanEnv('INFINITEPAY_DIAGNOSTIC');
-    if (!enabled) return;
-    if (payload === undefined) {
-      console.log(message);
-      return;
-    }
-    console.log(message, payload);
+    void message;
+    void payload;
   }
 
   private readBooleanEnv(key: string) {

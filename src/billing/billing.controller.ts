@@ -181,7 +181,6 @@ export class BillingController {
   @Public()
   @Get('webhooks/infinitepay')
   async getInfinitePayWebhookDebug() {
-    console.log('[BillingController] GET /billing/webhooks/infinitepay (debug ping)');
     return { ok: true, route: '/billing/webhooks/infinitepay', method: 'GET' };
   }
 
@@ -207,15 +206,8 @@ export class BillingController {
   }
 
   private logWebhook(message: string, payload?: unknown) {
-    const raw = String(process.env.INFINITEPAY_WEBHOOK_DEBUG || '').trim().toLowerCase();
-    const enabled =
-      raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on' || process.env.NODE_ENV !== 'production';
-    if (!enabled) return;
-    if (payload === undefined) {
-      console.log(message);
-      return;
-    }
-    console.log(message, payload);
+    void message;
+    void payload;
   }
 
   private assertCompanyAccess(companyId: string, req: any) {

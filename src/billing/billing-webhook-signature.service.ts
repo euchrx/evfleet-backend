@@ -16,9 +16,6 @@ export class BillingWebhookSignatureService {
   ) {
     const validationDisabled = this.isValidationDisabled();
     if (validationDisabled) {
-      console.warn(
-        '[BillingWebhookSignatureService] Validacao de assinatura desabilitada por INFINITEPAY_DISABLE_WEBHOOK_SIGNATURE=true',
-      );
       return true;
     }
 
@@ -104,13 +101,7 @@ export class BillingWebhookSignatureService {
   }
 
   private logDebug(message: string, payload?: unknown) {
-    const enabled = String(process.env.INFINITEPAY_WEBHOOK_DEBUG || '').trim().toLowerCase();
-    const shouldLog = enabled === '1' || enabled === 'true' || enabled === 'yes' || enabled === 'on';
-    if (!shouldLog) return;
-    if (payload === undefined) {
-      console.log(message);
-      return;
-    }
-    console.log(message, payload);
+    void message;
+    void payload;
   }
 }
