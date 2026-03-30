@@ -7,6 +7,7 @@ import {
 import {
   DebtCategory,
   FuelType,
+  Prisma,
   XmlImportBatchStatus,
   XmlInvoiceStatus,
   XmlProcessingStatus,
@@ -685,16 +686,17 @@ export class XmlImportService {
     const normalizedInvoiceNumber = this.toText(invoice.invoiceKey) || null;
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const existingFuelRecord = normalizedInvoiceNumber
-        ? await tx.fuelRecord.findFirst({
-            where: { invoiceNumber: normalizedInvoiceNumber },
-            select: { id: true },
-          })
+      const existingFuelRecordId = normalizedInvoiceNumber
+        ? await this.findFuelRecordIdByInvoiceNumberTx(tx, normalizedInvoiceNumber)
         : null;
 
-      const createdFuelRecord = existingFuelRecord
-        ? existingFuelRecord
-        : await tx.fuelRecord.create({
+      let createdFuelRecord: { id: string };
+
+      if (existingFuelRecordId) {
+        createdFuelRecord = { id: existingFuelRecordId };
+      } else {
+        try {
+          createdFuelRecord = await tx.fuelRecord.create({
             data: {
               invoiceNumber: normalizedInvoiceNumber,
               liters,
@@ -708,6 +710,28 @@ export class XmlImportService {
             },
             select: { id: true },
           });
+        } catch (error) {
+          if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2002' &&
+            normalizedInvoiceNumber
+          ) {
+            const concurrentExistingId = await this.findFuelRecordIdByInvoiceNumberTx(
+              tx,
+              normalizedInvoiceNumber,
+            );
+            if (concurrentExistingId) {
+              createdFuelRecord = { id: concurrentExistingId };
+            } else {
+              throw new BadRequestException(
+                `Nota ${normalizedInvoiceNumber} ja cadastrada em abastecimentos.`,
+              );
+            }
+          } else {
+            throw error;
+          }
+        }
+      }
 
       const updatedInvoice = await tx.xmlInvoice.update({
         where: { id: invoice.id },
@@ -722,7 +746,7 @@ export class XmlImportService {
       return {
         invoice: updatedInvoice,
         createdRecordId: createdFuelRecord.id,
-        reusedRecord: Boolean(existingFuelRecord),
+        reusedRecord: Boolean(existingFuelRecordId),
       };
     });
 
@@ -738,6 +762,23 @@ export class XmlImportService {
       createdRecordType: 'FUEL_RECORD',
       createdRecordId: result.createdRecordId,
     };
+  }
+
+  private async findFuelRecordIdByInvoiceNumberTx(
+    tx: any,
+    invoiceNumber: string,
+  ): Promise<string | null> {
+    const normalized = String(invoiceNumber || '').trim();
+    if (!normalized) return null;
+
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM "FuelRecord"
+      WHERE "invoiceNumber" = ${normalized}
+      LIMIT 1
+    `;
+
+    return rows?.[0]?.id || null;
   }
 
   async processInvoiceAsMaintenance(companyId: string, invoiceId: string) {
