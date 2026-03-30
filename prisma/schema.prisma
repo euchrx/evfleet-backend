@@ -249,6 +249,7 @@ enum DebtCategory {
 
 model FuelRecord {
   id         String   @id @default(uuid())
+  invoiceNumber String? @unique
   liters     Float
   totalValue Float
   km         Int
@@ -455,6 +456,7 @@ model Plan {
   name        String
   description String?
   priceCents  Int
+  vehicleLimit Int?
   currency    String       @default("BRL")
   interval    PlanInterval
   isActive    Boolean      @default(true)

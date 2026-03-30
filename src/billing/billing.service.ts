@@ -100,6 +100,8 @@ export class BillingService {
           name,
           description: description || null,
           priceCents: dto.priceCents,
+          vehicleLimit:
+            dto.vehicleLimit !== undefined ? Number(dto.vehicleLimit) : null,
           currency,
           interval: dto.interval,
           isActive: dto.active ?? true,
@@ -112,6 +114,7 @@ export class BillingService {
         name: plan.name,
         description: plan.description,
         priceCents: plan.priceCents,
+        vehicleLimit: plan.vehicleLimit,
         currency: plan.currency,
         interval: plan.interval,
         active: plan.isActive,
@@ -170,6 +173,9 @@ export class BillingService {
           ...(name !== undefined ? { name } : {}),
           ...(description !== undefined ? { description: description || null } : {}),
           ...(dto.priceCents !== undefined ? { priceCents: dto.priceCents } : {}),
+          ...(dto.vehicleLimit !== undefined
+            ? { vehicleLimit: Number(dto.vehicleLimit) }
+            : {}),
           ...(currency !== undefined ? { currency } : {}),
           ...(dto.interval !== undefined ? { interval: dto.interval } : {}),
           ...(dto.active !== undefined ? { isActive: dto.active } : {}),
@@ -182,6 +188,7 @@ export class BillingService {
         name: updated.name,
         description: updated.description,
         priceCents: updated.priceCents,
+        vehicleLimit: updated.vehicleLimit,
         currency: updated.currency,
         interval: updated.interval,
         active: updated.isActive,
@@ -407,6 +414,8 @@ export class BillingService {
       throw new BadRequestException('Assinatura não pertence à empresa informada.');
     }
 
+    await this.assertPaymentWindowOpenForSubscription(subscription);
+
     const amountCents = Number(input.amountCents || subscription.plan.priceCents || 0);
     this.validateMinimumAmountOrThrow(amountCents);
     const description = input.description?.trim() || `Assinatura ${subscription.plan.name}`;
@@ -485,6 +494,8 @@ export class BillingService {
     if (companyId && subscription.companyId !== companyId) {
       throw new BadRequestException('Assinatura não pertence à empresa informada.');
     }
+
+    await this.assertPaymentWindowOpenForSubscription(subscription);
 
     const amountCents = Number(subscription.plan.priceCents || 0);
     this.validateMinimumAmountOrThrow(amountCents);
@@ -1397,6 +1408,53 @@ export class BillingService {
   private getErrorMessage(error: unknown) {
     if (error instanceof Error) return error.message;
     return 'Erro desconhecido ao processar webhook.';
+  }
+
+  private async assertPaymentWindowOpenForSubscription(subscription: {
+    id: string;
+    currentPeriodStart?: Date | null;
+    nextBillingAt?: Date | null;
+  }) {
+    const nextBillingAt = subscription.nextBillingAt
+      ? new Date(subscription.nextBillingAt)
+      : null;
+    if (!nextBillingAt || Number.isNaN(nextBillingAt.getTime())) return;
+
+    const unlockDaysBeforeDue = this.getPaymentUnlockDaysBeforeDue();
+    const unlockDate = new Date(nextBillingAt);
+    unlockDate.setDate(unlockDate.getDate() - unlockDaysBeforeDue);
+
+    const now = new Date();
+    if (now >= unlockDate) return;
+
+    const paidPayment = await this.prisma.payment.findFirst({
+      where: {
+        subscriptionId: subscription.id,
+        status: PaymentStatus.PAID,
+        ...(subscription.currentPeriodStart
+          ? { paidAt: { gte: subscription.currentPeriodStart } }
+          : {}),
+      },
+      orderBy: [{ paidAt: 'desc' }, { updatedAt: 'desc' }],
+      select: { id: true },
+    });
+
+    if (!paidPayment) return;
+
+    const releaseDate = unlockDate.toLocaleDateString('pt-BR');
+    throw new BadRequestException(
+      `Pagamento deste ciclo já foi confirmado. Nova cobrança será liberada a partir de ${releaseDate}.`,
+    );
+  }
+
+  private getPaymentUnlockDaysBeforeDue() {
+    const raw = Number(
+      this.configService?.get<string>('BILLING_PAYMENT_UNLOCK_DAYS_BEFORE_DUE') ??
+        process.env.BILLING_PAYMENT_UNLOCK_DAYS_BEFORE_DUE ??
+        5,
+    );
+    if (!Number.isFinite(raw) || raw < 0) return 5;
+    return Math.floor(raw);
   }
 
   private toInputJson(value: unknown): Prisma.InputJsonValue {

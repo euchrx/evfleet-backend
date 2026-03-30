@@ -31,6 +31,11 @@ export class CreatePlanDto {
   priceCents: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  vehicleLimit?: number;
+
+  @IsOptional()
   @IsString()
   @Length(3, 3)
   currency?: string;

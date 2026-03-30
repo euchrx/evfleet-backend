@@ -30,6 +30,11 @@ export class CreateFuelRecordDto {
   @IsDateString()
   fuelDate: string;
 
+  @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  invoiceNumber?: string;
+
   @IsEnum(FuelTypeDto)
   fuelType: FuelTypeDto;
 

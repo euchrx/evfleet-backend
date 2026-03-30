@@ -36,6 +36,11 @@ export class UpdateFuelRecordDto {
   fuelDate?: string;
 
   @IsOptional()
+  @IsString()
+  @Length(1, 80)
+  invoiceNumber?: string;
+
+  @IsOptional()
   @IsEnum(FuelTypeDto)
   fuelType?: FuelTypeDto;
 

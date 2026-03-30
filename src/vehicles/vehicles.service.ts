@@ -1,8 +1,10 @@
 import {
+  ConflictException,
   BadRequestException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
@@ -16,6 +18,48 @@ type ChangeItem = {
 @Injectable()
 export class VehiclesService {
   constructor(private prisma: PrismaService) {}
+
+  private async enforceVehicleLimitForCompany(companyId: string) {
+    const normalizedCompanyId = String(companyId || '').trim();
+    if (!normalizedCompanyId) return;
+
+    const subscription = await this.prisma.subscription.findFirst({
+      where: {
+        companyId: normalizedCompanyId,
+        status: {
+          in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING],
+        },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        plan: {
+          select: {
+            id: true,
+            name: true,
+            vehicleLimit: true,
+          },
+        },
+      },
+    });
+
+    const vehicleLimit = Number(subscription?.plan?.vehicleLimit || 0);
+    if (!Number.isFinite(vehicleLimit) || vehicleLimit <= 0) return;
+
+    const currentVehicles = await this.prisma.vehicle.count({
+      where: {
+        branch: {
+          companyId: normalizedCompanyId,
+        },
+      },
+    });
+
+    if (currentVehicles >= vehicleLimit) {
+      throw new ConflictException(
+        `Limite máximo atingido para cadastro de veículos. Plano permite até ${vehicleLimit} veículo(s).`,
+      );
+    }
+  }
 
   private async resolveBranchIdForCreate(
     inputBranchId: string | undefined,
@@ -208,6 +252,16 @@ export class VehiclesService {
     context?: { role?: string; userCompanyId?: string; scopeCompanyId?: string },
   ) {
     const resolvedBranchId = await this.resolveBranchIdForCreate(dto.branchId, context);
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: resolvedBranchId },
+      select: { companyId: true },
+    });
+
+    if (!branch?.companyId) {
+      throw new BadRequestException('Empresa vinculada à filial não encontrada.');
+    }
+
+    await this.enforceVehicleLimitForCompany(branch.companyId);
 
     const plate = this.normalizeText(dto.plate)?.toUpperCase() || '';
     const chassis = this.normalizeText(dto.chassis)?.toUpperCase() || null;

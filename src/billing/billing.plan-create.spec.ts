@@ -37,6 +37,7 @@ describe('BillingService createPlan', () => {
       name: 'Plano Pro',
       description: 'Plano completo',
       priceCents: 19900,
+      vehicleLimit: 25,
       currency: 'BRL',
       interval: PlanInterval.MONTHLY,
       isActive: true,
@@ -48,6 +49,7 @@ describe('BillingService createPlan', () => {
       name: 'Plano Pro',
       description: 'Plano completo',
       priceCents: 19900,
+      vehicleLimit: 25,
       interval: PlanInterval.MONTHLY,
     });
 
@@ -62,6 +64,7 @@ describe('BillingService createPlan', () => {
       name: 'Plano Pro',
       description: 'Plano completo',
       priceCents: 19900,
+      vehicleLimit: 25,
       currency: 'BRL',
       interval: PlanInterval.MONTHLY,
       active: true,

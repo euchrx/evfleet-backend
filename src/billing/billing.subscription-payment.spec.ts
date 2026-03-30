@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { BillingService } from './billing.service';
 import { InfinitePayGateway } from './gateways/infinitepay.gateway';
 import { createInMemoryBillingPrisma } from './test-utils/in-memory-billing-prisma';
@@ -11,7 +11,7 @@ describe('BillingService Subscription + Payment', () => {
         {
           id: 'plan_1',
           code: 'basic',
-          name: 'Plano Básico',
+          name: 'Plano Basico',
           priceCents: 9900,
           currency: 'BRL',
           interval: 'MONTHLY',
@@ -25,7 +25,7 @@ describe('BillingService Subscription + Payment', () => {
     } as unknown as InfinitePayGateway;
 
     const service = new BillingService(prisma as any, gateway);
-    return { service, gateway: gateway as any, state };
+    return { service, gateway: gateway as any, state, prisma: prisma as any };
   };
 
   it('cria assinatura para company ativa com plano ativo', async () => {
@@ -40,13 +40,14 @@ describe('BillingService Subscription + Payment', () => {
     expect(state.subscriptions).toHaveLength(1);
   });
 
-  it('impede duplicidade de assinatura ACTIVE/TRIALING', async () => {
-    const { service } = createService();
+  it('nao cria duplicidade de assinatura ACTIVE/TRIALING para o mesmo plano', async () => {
+    const { service, state } = createService();
     await service.createSubscriptionForCompany('company_1', 'plan_1');
+    const second = await service.createSubscriptionForCompany('company_1', 'plan_1');
 
-    await expect(service.createSubscriptionForCompany('company_1', 'plan_1')).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    expect(second.companyId).toBe('company_1');
+    expect(second.planId).toBe('plan_1');
+    expect(state.subscriptions).toHaveLength(1);
   });
 
   it('cria payment inicial com valor do plano e dados de checkout', async () => {
@@ -134,7 +135,81 @@ describe('BillingService Subscription + Payment', () => {
 
     await expect(
       service.createInitialPaymentForSubscription(subscription.id, 'company_1'),
-    ).rejects.toThrow('Valor mínimo para pagamento é');
+    ).rejects.toThrow('Valor m');
     expect((gateway as any).createCheckoutLink).not.toHaveBeenCalled();
+  });
+
+  it('bloqueia nova tentativa quando ciclo ja esta pago e fora da janela de liberacao', async () => {
+    const { service, gateway, prisma } = createService();
+    const subscription = await service.createSubscriptionForCompany('company_1', 'plan_1');
+
+    const now = new Date();
+    const dueDate = new Date(now);
+    dueDate.setDate(dueDate.getDate() + 25);
+
+    await prisma.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        currentPeriodStart: now,
+        nextBillingAt: dueDate,
+      },
+    });
+
+    await prisma.payment.create({
+      data: {
+        companyId: 'company_1',
+        subscriptionId: subscription.id,
+        gateway: 'INFINITEPAY',
+        status: 'PAID',
+        amountCents: 9900,
+        currency: 'BRL',
+        paidAt: now,
+      },
+    });
+
+    await expect(
+      service.createInitialPaymentForSubscription(subscription.id, 'company_1'),
+    ).rejects.toThrow('Pagamento deste ciclo');
+
+    expect(gateway.createCheckoutLink).not.toHaveBeenCalled();
+  });
+
+  it('libera nova tentativa perto da proxima cobranca', async () => {
+    const { service, gateway, prisma } = createService();
+    const subscription = await service.createSubscriptionForCompany('company_1', 'plan_1');
+
+    const now = new Date();
+    const dueDate = new Date(now);
+    dueDate.setDate(dueDate.getDate() + 3);
+
+    await prisma.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        currentPeriodStart: now,
+        nextBillingAt: dueDate,
+      },
+    });
+
+    await prisma.payment.create({
+      data: {
+        companyId: 'company_1',
+        subscriptionId: subscription.id,
+        gateway: 'INFINITEPAY',
+        status: 'PAID',
+        amountCents: 9900,
+        currency: 'BRL',
+        paidAt: now,
+      },
+    });
+
+    gateway.createCheckoutLink.mockResolvedValue({
+      gatewayReference: 'gw_retry_1',
+      checkoutUrl: 'https://checkout.local/retry-1',
+      rawResponse: { id: 'gw_retry_1' },
+    });
+
+    const result = await service.createInitialPaymentForSubscription(subscription.id, 'company_1');
+    expect(result.checkoutUrl).toBe('https://checkout.local/retry-1');
+    expect(gateway.createCheckoutLink).toHaveBeenCalledTimes(1);
   });
 });

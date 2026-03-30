@@ -21,6 +21,35 @@ export class FuelRecordsService {
     driver: true,
   } as const;
 
+  private normalizeInvoiceNumber(value?: string | null) {
+    const normalized = String(value || '').trim().toUpperCase();
+    return normalized || null;
+  }
+
+  private async ensureInvoiceNumberAvailable(
+    invoiceNumber?: string | null,
+    ignoreId?: string,
+  ) {
+    const normalized = this.normalizeInvoiceNumber(invoiceNumber);
+    if (!normalized) return null;
+
+    const existing = await (this.prisma as any).fuelRecord.findFirst({
+      where: {
+        invoiceNumber: normalized,
+        ...(ignoreId ? { id: { not: ignoreId } } : {}),
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      throw new BadRequestException(
+        `Nota ${normalized} já cadastrada. Não é permitido duplicar notas.`,
+      );
+    }
+
+    return normalized;
+  }
+
   private async calculateConsumption(
     vehicleId: string,
     km: number,
@@ -76,6 +105,9 @@ export class FuelRecordsService {
   async create(dto: CreateFuelRecordDto) {
     await this.ensureVehicleExists(dto.vehicleId);
     if (dto.driverId) await this.ensureDriverExists(dto.driverId);
+    const invoiceNumber = await this.ensureInvoiceNumberAvailable(
+      dto.invoiceNumber,
+    );
 
     const fuelDate = new Date(dto.fuelDate);
     const consumption = await this.calculateConsumption(
@@ -91,6 +123,7 @@ export class FuelRecordsService {
         totalValue: dto.totalValue,
         km: Math.round(dto.km),
         station: dto.station,
+        invoiceNumber,
         fuelType: dto.fuelType,
         fuelDate,
         vehicleId: dto.vehicleId,
@@ -204,6 +237,10 @@ export class FuelRecordsService {
     if (dto.driverId) {
       await this.ensureDriverExists(dto.driverId);
     }
+    const invoiceNumber =
+      dto.invoiceNumber !== undefined
+        ? await this.ensureInvoiceNumberAvailable(dto.invoiceNumber, id)
+        : undefined;
 
     const nextVehicleId = dto.vehicleId ?? previous.vehicleId;
     const nextKm = dto.km !== undefined ? Math.round(dto.km) : previous.km;
@@ -225,6 +262,7 @@ export class FuelRecordsService {
         ...(dto.totalValue !== undefined ? { totalValue: dto.totalValue } : {}),
         ...(dto.km !== undefined ? { km: Math.round(dto.km) } : {}),
         ...(dto.station !== undefined ? { station: dto.station } : {}),
+        ...(dto.invoiceNumber !== undefined ? { invoiceNumber } : {}),
         ...(dto.fuelType !== undefined ? { fuelType: dto.fuelType } : {}),
         ...(dto.fuelDate !== undefined ? { fuelDate: new Date(dto.fuelDate) } : {}),
         ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
