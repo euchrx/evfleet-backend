@@ -28,6 +28,14 @@ type ImportXmlZipInput = {
   periodLabel?: string;
 };
 
+type ListRetailProductImportsFilters = {
+  dateFrom?: string;
+  dateTo?: string;
+  supplier?: string;
+  invoiceNumber?: string;
+  itemDescription?: string;
+};
+
 type ParsedXmlInvoice = {
   invoiceKey: string;
   number?: string;
@@ -278,6 +286,7 @@ export class XmlImportService {
             linkedFuelRecordId: true,
             linkedMaintenanceRecordId: true,
             linkedCostId: true,
+            linkedRetailProductImportId: true,
             createdAt: true,
             _count: {
               select: {
@@ -325,6 +334,7 @@ export class XmlImportService {
         linkedFuelRecordId: true,
         linkedMaintenanceRecordId: true,
         linkedCostId: true,
+        linkedRetailProductImportId: true,
         createdAt: true,
         _count: {
           select: {
@@ -333,6 +343,175 @@ export class XmlImportService {
         },
       },
     });
+  }
+
+  async listRetailProductImports(
+    companyId: string,
+    filters: ListRetailProductImportsFilters = {},
+  ) {
+    const dateFrom = this.toDate(filters.dateFrom);
+    const dateTo = this.toDate(filters.dateTo);
+    const supplier = String(filters.supplier || '').trim();
+    const invoiceNumber = String(filters.invoiceNumber || '').trim();
+    const itemDescription = String(filters.itemDescription || '').trim();
+
+    const issuedAtFilter: { gte?: Date; lte?: Date } = {};
+    if (dateFrom) {
+      issuedAtFilter.gte = new Date(
+        dateFrom.getFullYear(),
+        dateFrom.getMonth(),
+        dateFrom.getDate(),
+        0,
+        0,
+        0,
+        0,
+      );
+    }
+    if (dateTo) {
+      issuedAtFilter.lte = new Date(
+        dateTo.getFullYear(),
+        dateTo.getMonth(),
+        dateTo.getDate(),
+        23,
+        59,
+        59,
+        999,
+      );
+    }
+
+    return this.prisma.retailProductImport.findMany({
+      where: {
+        companyId,
+        ...(Object.keys(issuedAtFilter).length > 0
+          ? { issuedAt: issuedAtFilter }
+          : {}),
+        ...(supplier
+          ? { supplierName: { contains: supplier, mode: 'insensitive' } }
+          : {}),
+        ...(invoiceNumber
+          ? { invoiceNumber: { contains: invoiceNumber, mode: 'insensitive' } }
+          : {}),
+        ...(itemDescription
+          ? {
+              items: {
+                some: {
+                  description: {
+                    contains: itemDescription,
+                    mode: 'insensitive',
+                  },
+                },
+              },
+            }
+          : {}),
+      },
+      orderBy: [{ issuedAt: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        supplierName: true,
+        supplierDocument: true,
+        invoiceNumber: true,
+        invoiceSeries: true,
+        issuedAt: true,
+        totalAmount: true,
+        createdAt: true,
+        updatedAt: true,
+        branch: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        xmlInvoice: {
+          select: {
+            id: true,
+            invoiceKey: true,
+            number: true,
+            series: true,
+            issuedAt: true,
+            invoiceStatus: true,
+            processingType: true,
+            processingStatus: true,
+          },
+        },
+        _count: {
+          select: {
+            items: true,
+          },
+        },
+      },
+    });
+  }
+
+  async getRetailProductImportById(companyId: string, retailImportId: string) {
+    const retailImport = await this.prisma.retailProductImport.findFirst({
+      where: {
+        id: retailImportId,
+        companyId,
+      },
+      select: {
+        id: true,
+        supplierName: true,
+        supplierDocument: true,
+        invoiceNumber: true,
+        invoiceSeries: true,
+        issuedAt: true,
+        totalAmount: true,
+        createdAt: true,
+        updatedAt: true,
+        branch: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        xmlInvoice: {
+          select: {
+            id: true,
+            invoiceKey: true,
+            number: true,
+            series: true,
+            issuedAt: true,
+            issuerName: true,
+            issuerDocument: true,
+            recipientName: true,
+            recipientDocument: true,
+            invoiceStatus: true,
+            processingType: true,
+            processingStatus: true,
+            processedAt: true,
+            totalAmount: true,
+            protocolNumber: true,
+            folderName: true,
+            fileName: true,
+          },
+        },
+        items: {
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            productCode: true,
+            description: true,
+            quantity: true,
+            unitValue: true,
+            totalValue: true,
+            createdAt: true,
+          },
+        },
+        _count: {
+          select: {
+            items: true,
+          },
+        },
+      },
+    });
+
+    if (!retailImport) {
+      throw new NotFoundException(
+        'Importacao de produtos nao encontrada para esta empresa.',
+      );
+    }
+
+    return retailImport;
   }
 
   async deleteInvoices(companyId: string, invoiceIds: string[]) {
@@ -406,6 +585,7 @@ export class XmlImportService {
         linkedFuelRecordId: true,
         linkedMaintenanceRecordId: true,
         linkedCostId: true,
+        linkedRetailProductImportId: true,
         createdAt: true,
         updatedAt: true,
         rawXml: includeRawXml,
@@ -430,7 +610,8 @@ export class XmlImportService {
       throw new NotFoundException('Nota XML nao encontrada para esta empresa.');
     }
 
-    const [linkedFuelRecord, linkedMaintenanceRecord, linkedCost] = await Promise.all([
+    const [linkedFuelRecord, linkedMaintenanceRecord, linkedCost, linkedRetailProductImport] =
+      await Promise.all([
       invoice.linkedFuelRecordId
         ? this.prisma.fuelRecord.findUnique({
             where: { id: invoice.linkedFuelRecordId },
@@ -470,13 +651,29 @@ export class XmlImportService {
             },
           })
         : Promise.resolve(null),
-    ]);
+      invoice.linkedRetailProductImportId
+        ? this.prisma.retailProductImport.findUnique({
+            where: { id: invoice.linkedRetailProductImportId },
+            select: {
+              id: true,
+              supplierName: true,
+              supplierDocument: true,
+              invoiceNumber: true,
+              invoiceSeries: true,
+              issuedAt: true,
+              totalAmount: true,
+              branchId: true,
+            },
+          })
+        : Promise.resolve(null),
+      ]);
 
     return {
       ...invoice,
       linkedFuelRecord,
       linkedMaintenanceRecord,
       linkedCost,
+      linkedRetailProductImport,
     };
   }
 
@@ -485,22 +682,32 @@ export class XmlImportService {
     const liters = this.sumInvoiceItemQuantity(invoice.items);
     const totalValue = this.decimalToNumber(invoice.totalAmount);
     const fuelType = this.inferFuelTypeFromItems(invoice.items);
+    const normalizedInvoiceNumber = this.toText(invoice.invoiceKey) || null;
 
     const result = await this.prisma.$transaction(async (tx) => {
-      const createdFuelRecord = await tx.fuelRecord.create({
-        data: {
-          invoiceNumber: invoice.invoiceKey,
-          liters,
-          totalValue,
-          km: 0,
-          station: invoice.issuerName || 'Fornecedor nao informado',
-          fuelType,
-          fuelDate: invoice.issuedAt || new Date(),
-          vehicleId: null,
-          driverId: null,
-        },
-        select: { id: true },
-      });
+      const existingFuelRecord = normalizedInvoiceNumber
+        ? await tx.fuelRecord.findFirst({
+            where: { invoiceNumber: normalizedInvoiceNumber },
+            select: { id: true },
+          })
+        : null;
+
+      const createdFuelRecord = existingFuelRecord
+        ? existingFuelRecord
+        : await tx.fuelRecord.create({
+            data: {
+              invoiceNumber: normalizedInvoiceNumber,
+              liters,
+              totalValue,
+              km: 0,
+              station: invoice.issuerName || 'Fornecedor nao informado',
+              fuelType,
+              fuelDate: invoice.issuedAt || new Date(),
+              vehicleId: null,
+              driverId: null,
+            },
+            select: { id: true },
+          });
 
       const updatedInvoice = await tx.xmlInvoice.update({
         where: { id: invoice.id },
@@ -515,11 +722,14 @@ export class XmlImportService {
       return {
         invoice: updatedInvoice,
         createdRecordId: createdFuelRecord.id,
+        reusedRecord: Boolean(existingFuelRecord),
       };
     });
 
     this.logger.log(
-      `[xml-import] invoiceId=${invoiceId} tipo=fuel criado fuelRecordId=${result.createdRecordId}`,
+      `[xml-import] invoiceId=${invoiceId} tipo=fuel ${
+        result.reusedRecord ? 'reaproveitado' : 'criado'
+      } fuelRecordId=${result.createdRecordId}`,
     );
 
     return {
@@ -637,6 +847,72 @@ export class XmlImportService {
       invoiceId: result.invoice.id,
       processingStatus: result.invoice.processingStatus,
       createdRecordType: 'COST_RECORD',
+      createdRecordId: result.createdRecordId,
+    };
+  }
+
+  async processInvoiceAsRetailProduct(companyId: string, invoiceId: string) {
+    const invoice = await this.getProcessableInvoice(companyId, invoiceId);
+
+    if (invoice.processingType !== XmlProcessingType.RETAIL_PRODUCT) {
+      throw new BadRequestException(
+        'A nota informada nao esta classificada como produto de loja.',
+      );
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const createdRetailImport = await tx.retailProductImport.create({
+        data: {
+          companyId,
+          branchId: invoice.branchId || null,
+          xmlInvoiceId: invoice.id,
+          supplierName: invoice.issuerName || null,
+          supplierDocument: invoice.issuerDocument || null,
+          invoiceNumber: invoice.number || null,
+          invoiceSeries: invoice.series || null,
+          issuedAt: invoice.issuedAt || null,
+          totalAmount: invoice.totalAmount ?? null,
+          items: {
+            create: invoice.items.map((item) => ({
+              productCode: this.toText(item.productCode) || null,
+              description: this.toText(item.description) || 'Item sem descricao',
+              quantity: this.toNumber(item.quantity) ?? null,
+              unitValue: this.toNumber(item.unitValue) ?? null,
+              totalValue: this.toNumber(item.totalValue) ?? null,
+            })),
+          },
+        },
+        select: { id: true },
+      });
+
+      const updatedInvoice = await tx.xmlInvoice.update({
+        where: { id: invoice.id },
+        data: {
+          processingStatus: XmlProcessingStatus.PROCESSED,
+          processedAt: new Date(),
+          linkedRetailProductImportId: createdRetailImport.id,
+        },
+        select: {
+          id: true,
+          processingStatus: true,
+          linkedRetailProductImportId: true,
+        },
+      });
+
+      return {
+        invoice: updatedInvoice,
+        createdRecordId: createdRetailImport.id,
+      };
+    });
+
+    this.logger.log(
+      `[xml-import] invoiceId=${invoiceId} tipo=retail-product criado retailProductImportId=${result.createdRecordId}`,
+    );
+
+    return {
+      invoiceId: result.invoice.id,
+      processingStatus: result.invoice.processingStatus,
+      createdRecordType: 'RETAIL_PRODUCT_IMPORT',
       createdRecordId: result.createdRecordId,
     };
   }
@@ -880,7 +1156,10 @@ export class XmlImportService {
         number: true,
         issuedAt: true,
         issuerName: true,
+        issuerDocument: true,
         totalAmount: true,
+        branchId: true,
+        series: true,
         processingType: true,
         processingStatus: true,
         items: {
@@ -888,6 +1167,8 @@ export class XmlImportService {
             description: true,
             quantity: true,
             productCode: true,
+            unitValue: true,
+            totalValue: true,
           },
         },
       },
@@ -1111,6 +1392,27 @@ export class XmlImportService {
     if (hasKeyword(serviceKeywords)) {
       this.logger.log('[xml-import] tipo identificado: SERVICE');
       return XmlProcessingType.SERVICE;
+    }
+
+    const retailProductKeywords = [
+      'PERFUMARIA',
+      'SHAMPOO',
+      'SABONETE',
+      'DESODORANTE',
+      'BALA',
+      'REFRIGERANTE',
+      'BEBIDA',
+      'SALGADINHO',
+      'CHOCOLATE',
+      'CONVENIENCIA',
+      'HIGIENE',
+      'LIMPEZA',
+      'ACESSORIO',
+      'UTILIDADE',
+    ];
+    if (hasKeyword(retailProductKeywords)) {
+      this.logger.log('[xml-import] tipo identificado: RETAIL_PRODUCT');
+      return XmlProcessingType.RETAIL_PRODUCT;
     }
 
     this.logger.log('[xml-import] tipo identificado: UNKNOWN (fallback)');

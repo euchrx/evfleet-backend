@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateFuelRecordDto } from './dto/create-fuel-record.dto';
 import { UpdateFuelRecordDto } from './dto/update-fuel-record.dto';
@@ -117,23 +118,36 @@ export class FuelRecordsService {
       fuelDate,
     );
 
-    const created = await (this.prisma as any).fuelRecord.create({
-      data: {
-        liters: dto.liters,
-        totalValue: dto.totalValue,
-        km: Math.round(dto.km),
-        station: dto.station,
-        invoiceNumber,
-        fuelType: dto.fuelType,
-        fuelDate,
-        vehicleId: dto.vehicleId,
-        driverId: dto.driverId ?? null,
-        averageConsumptionKmPerLiter: consumption.averageConsumptionKmPerLiter,
-        isAnomaly: consumption.isAnomaly,
-        anomalyReason: consumption.anomalyReason,
-      },
-      include: this.includeVehicle,
-    });
+    let created: any;
+    try {
+      created = await (this.prisma as any).fuelRecord.create({
+        data: {
+          liters: dto.liters,
+          totalValue: dto.totalValue,
+          km: Math.round(dto.km),
+          station: dto.station,
+          invoiceNumber,
+          fuelType: dto.fuelType,
+          fuelDate,
+          vehicleId: dto.vehicleId,
+          driverId: dto.driverId ?? null,
+          averageConsumptionKmPerLiter: consumption.averageConsumptionKmPerLiter,
+          isAnomaly: consumption.isAnomaly,
+          anomalyReason: consumption.anomalyReason,
+        },
+        include: this.includeVehicle,
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new BadRequestException(
+          `Nota ${invoiceNumber || dto.invoiceNumber || ''} ja cadastrada. Nao e permitido duplicar notas.`,
+        );
+      }
+      throw error;
+    }
 
     await this.updateVehicleKm(created.vehicleId, created.km);
     return created;

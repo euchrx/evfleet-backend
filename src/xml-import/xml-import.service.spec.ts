@@ -1,5 +1,9 @@
 import AdmZip from 'adm-zip';
-import { XmlImportBatchStatus } from '@prisma/client';
+import {
+  XmlImportBatchStatus,
+  XmlProcessingStatus,
+  XmlProcessingType,
+} from '@prisma/client';
 import { XmlImportService } from './xml-import.service';
 
 type StoredInvoice = {
@@ -318,6 +322,82 @@ describe('XmlImportService', () => {
     );
   });
 
+  it('classifica item de perfumaria como RETAIL_PRODUCT', async () => {
+    const { prisma } = createPrismaMock();
+    const service = new XmlImportService(prisma);
+    const zipBuffer = zipFromEntries([
+      {
+        name: '202602/nfe_perfumaria.xml',
+        content: createValidNfeXml({
+          key: '56565656565656565656565656565656565656565656',
+          number: '56',
+          series: '1',
+          items: [
+            {
+              productCode: 'PF01',
+              description: 'Shampoo perfumaria premium',
+              quantity: '1.0000',
+              unitValue: '19.9000',
+              totalValue: '19.90',
+            },
+          ],
+        }),
+      },
+    ]);
+
+    await service.importZip({
+      companyId: 'company_1',
+      fileName: 'perfumaria.zip',
+      zipBuffer,
+    });
+
+    expect(prisma.xmlInvoice.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          processingType: XmlProcessingType.RETAIL_PRODUCT,
+        }),
+      }),
+    );
+  });
+
+  it('classifica item de conveniencia como RETAIL_PRODUCT', async () => {
+    const { prisma } = createPrismaMock();
+    const service = new XmlImportService(prisma);
+    const zipBuffer = zipFromEntries([
+      {
+        name: '202602/nfe_conveniencia.xml',
+        content: createValidNfeXml({
+          key: '67676767676767676767676767676767676767676767',
+          number: '67',
+          series: '1',
+          items: [
+            {
+              productCode: 'CV01',
+              description: 'Refrigerante lata conveniencia',
+              quantity: '2.0000',
+              unitValue: '6.5000',
+              totalValue: '13.00',
+            },
+          ],
+        }),
+      },
+    ]);
+
+    await service.importZip({
+      companyId: 'company_1',
+      fileName: 'conveniencia.zip',
+      zipBuffer,
+    });
+
+    expect(prisma.xmlInvoice.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          processingType: XmlProcessingType.RETAIL_PRODUCT,
+        }),
+      }),
+    );
+  });
+
   it('registra erro em XML invalido sem derrubar lote inteiro', async () => {
     const { prisma } = createPrismaMock();
     const service = new XmlImportService(prisma);
@@ -392,5 +472,77 @@ describe('XmlImportService', () => {
     expect(summary.errorFiles).toBe(1);
     expect(summary.status).toBe(XmlImportBatchStatus.COMPLETED_WITH_ERRORS);
   });
-});
 
+  it('processa nota RETAIL_PRODUCT e cria importacao de produtos de loja', async () => {
+    const tx = {
+      retailProductImport: {
+        create: jest.fn(async () => ({ id: 'retail_import_1' })),
+      },
+      xmlInvoice: {
+        update: jest.fn(async () => ({
+          id: 'invoice_1',
+          processingStatus: XmlProcessingStatus.PROCESSED,
+          linkedRetailProductImportId: 'retail_import_1',
+        })),
+      },
+    };
+
+    const prisma = {
+      xmlInvoice: {
+        findFirst: jest.fn(async () => ({
+          id: 'invoice_1',
+          invoiceKey: '99999999999999999999999999999999999999999999',
+          number: '99',
+          series: '1',
+          issuedAt: new Date('2026-03-30T10:00:00-03:00'),
+          issuerName: 'Loja Conveniencia',
+          issuerDocument: '12345678000100',
+          totalAmount: 59.9,
+          branchId: null,
+          processingType: XmlProcessingType.RETAIL_PRODUCT,
+          processingStatus: XmlProcessingStatus.SUGGESTED,
+          items: [
+            {
+              productCode: 'CV01',
+              description: 'Refrigerante',
+              quantity: 2,
+              unitValue: 6.5,
+              totalValue: 13,
+            },
+          ],
+        })),
+      },
+      $transaction: jest.fn(async (callback: any) => callback(tx)),
+    };
+
+    const service = new XmlImportService(prisma as any);
+    const result = await service.processInvoiceAsRetailProduct('company_1', 'invoice_1');
+
+    expect(tx.retailProductImport.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          companyId: 'company_1',
+          xmlInvoiceId: 'invoice_1',
+          supplierName: 'Loja Conveniencia',
+        }),
+      }),
+    );
+    expect(tx.xmlInvoice.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'invoice_1' },
+        data: expect.objectContaining({
+          processingStatus: XmlProcessingStatus.PROCESSED,
+          linkedRetailProductImportId: 'retail_import_1',
+        }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        invoiceId: 'invoice_1',
+        processingStatus: XmlProcessingStatus.PROCESSED,
+        createdRecordType: 'RETAIL_PRODUCT_IMPORT',
+        createdRecordId: 'retail_import_1',
+      }),
+    );
+  });
+});

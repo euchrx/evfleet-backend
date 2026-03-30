@@ -30,6 +30,7 @@ model Company {
   webhookEvents WebhookEvent[]
   xmlImportBatches XmlImportBatch[]
   xmlInvoices      XmlInvoice[]
+  retailProductImports RetailProductImport[]
 
   @@index([active])
 }
@@ -47,6 +48,7 @@ model Branch {
   vehicles Vehicle[]
   xmlImportBatches XmlImportBatch[]
   xmlInvoices      XmlInvoice[]
+  retailProductImports RetailProductImport[]
 
   @@index([companyId])
 }
@@ -473,6 +475,7 @@ enum XmlProcessingType {
   FUEL
   PRODUCT
   SERVICE
+  RETAIL_PRODUCT
   UNKNOWN
 }
 
@@ -628,6 +631,7 @@ model XmlInvoice {
   linkedFuelRecordId       String?
   linkedMaintenanceRecordId String?
   linkedCostId             String?
+  linkedRetailProductImportId String?
   rawXml            String
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
@@ -642,6 +646,7 @@ model XmlInvoice {
   branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   items XmlInvoiceItem[]
+  retailProductImport RetailProductImport? @relation("RetailProductImportSource")
 
   @@index([batchId])
   @@index([companyId])
@@ -650,6 +655,7 @@ model XmlInvoice {
   @@index([linkedFuelRecordId])
   @@index([linkedMaintenanceRecordId])
   @@index([linkedCostId])
+  @@index([linkedRetailProductImportId])
 }
 
 model XmlInvoiceItem {
@@ -665,4 +671,46 @@ model XmlInvoiceItem {
   invoice   XmlInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
+}
+
+model RetailProductImport {
+  id               String   @id @default(uuid())
+  supplierName     String?
+  supplierDocument String?
+  invoiceNumber    String?
+  invoiceSeries    String?
+  issuedAt         DateTime?
+  totalAmount      Decimal? @db.Decimal(14, 2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  xmlInvoiceId String   @unique
+  xmlInvoice   XmlInvoice @relation("RetailProductImportSource", fields: [xmlInvoiceId], references: [id], onDelete: Restrict)
+
+  items RetailProductImportItem[]
+
+  @@index([companyId])
+  @@index([branchId])
+  @@index([issuedAt])
+}
+
+model RetailProductImportItem {
+  id          String   @id @default(uuid())
+  productCode String?
+  description String
+  quantity    Decimal? @db.Decimal(14, 4)
+  unitValue   Decimal? @db.Decimal(14, 4)
+  totalValue  Decimal? @db.Decimal(14, 2)
+  createdAt   DateTime @default(now())
+
+  retailProductImportId String
+  retailProductImport   RetailProductImport @relation(fields: [retailProductImportId], references: [id], onDelete: Cascade)
+
+  @@index([retailProductImportId])
 }

@@ -69,6 +69,31 @@ export class XmlImportController {
     return this.xmlImportService.listInvoices(companyId, batchId);
   }
 
+  @Get('retail-products')
+  listRetailProductImports(
+    @Req() req: any,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('supplier') supplier?: string,
+    @Query('invoiceNumber') invoiceNumber?: string,
+    @Query('itemDescription') itemDescription?: string,
+  ) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.listRetailProductImports(companyId, {
+      dateFrom,
+      dateTo,
+      supplier,
+      invoiceNumber,
+      itemDescription,
+    });
+  }
+
+  @Get('retail-products/:id')
+  getRetailProductImportById(@Req() req: any, @Param('id') id: string) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.getRetailProductImportById(companyId, id);
+  }
+
   @Delete('invoices')
   deleteInvoices(@Req() req: any, @Body() dto: DeleteXmlInvoicesDto) {
     const companyId = this.resolveCompanyIdFromUser(req);
@@ -102,6 +127,12 @@ export class XmlImportController {
   processInvoiceAsCost(@Req() req: any, @Param('id') id: string) {
     const companyId = this.resolveCompanyIdFromUser(req);
     return this.xmlImportService.processInvoiceAsCost(companyId, id);
+  }
+
+  @Post('invoices/:id/process/retail-product')
+  processInvoiceAsRetailProduct(@Req() req: any, @Param('id') id: string) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.processInvoiceAsRetailProduct(companyId, id);
   }
 
   @Post('invoices/:id/ignore')
