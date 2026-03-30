@@ -63,6 +63,12 @@ export class XmlImportController {
     return this.xmlImportService.getBatchById(companyId, id);
   }
 
+  @Delete('batches/:id')
+  deleteBatchById(@Param('id') id: string, @Req() req: any) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.deleteBatchById(companyId, id);
+  }
+
   @Get('invoices')
   listInvoices(@Req() req: any, @Query('batchId') batchId?: string) {
     const companyId = this.resolveCompanyIdFromUser(req);

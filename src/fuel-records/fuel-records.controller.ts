@@ -17,6 +17,7 @@ import { FuelRecordsService } from './fuel-records.service';
 import { CreateFuelRecordDto } from './dto/create-fuel-record.dto';
 import { UpdateFuelRecordDto } from './dto/update-fuel-record.dto';
 import { ImportXmlZipDto } from '../xml-import/dto/import-xml-zip.dto';
+import { LinkFuelRecordDto } from '../xml-import/dto/link-fuel-record.dto';
 import { XmlImportService } from '../xml-import/xml-import.service';
 
 @Controller('fuel-records')
@@ -81,6 +82,19 @@ export class FuelRecordsController {
       this.resolveCompanyIdFromUser(req),
       'FUEL',
       { period, issuerName, number, processingStatus, dateFrom, dateTo },
+    );
+  }
+
+  @Patch('imported-xml/:id/link/fuel')
+  completeImportedFuelLink(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: LinkFuelRecordDto,
+  ) {
+    return this.xmlImportService.completeFuelLink(
+      this.resolveCompanyIdFromUser(req),
+      id,
+      dto,
     );
   }
 

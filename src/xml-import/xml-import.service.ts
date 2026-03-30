@@ -484,6 +484,77 @@ export class XmlImportService {
     return batch;
   }
 
+  async deleteBatchById(companyId: string, batchId: string) {
+    const batch = await this.prisma.xmlImportBatch.findFirst({
+      where: {
+        id: batchId,
+        companyId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!batch) {
+      throw new NotFoundException('Lote XML nao encontrado para esta empresa.');
+    }
+
+    const invoiceIds = (
+      await this.prisma.xmlInvoice.findMany({
+        where: {
+          batchId: batch.id,
+          companyId,
+        },
+        select: {
+          id: true,
+        },
+      })
+    ).map((item) => item.id);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const deletedRetailProductImports =
+        invoiceIds.length > 0
+          ? await tx.retailProductImport.deleteMany({
+              where: {
+                companyId,
+                xmlInvoiceId: {
+                  in: invoiceIds,
+                },
+              },
+            })
+          : { count: 0 };
+
+      const deletedInvoices = await tx.xmlInvoice.deleteMany({
+        where: {
+          batchId: batch.id,
+          companyId,
+        },
+      });
+
+      await tx.xmlImportBatch.delete({
+        where: {
+          id: batch.id,
+        },
+      });
+
+      return {
+        deletedRetailProductImports: deletedRetailProductImports.count,
+        deletedInvoices: deletedInvoices.count,
+      };
+    });
+
+    this.logger.log(
+      `[xml-import] lote removido batchId=${batch.id} companyId=${companyId} invoices=${result.deletedInvoices} retailImports=${result.deletedRetailProductImports}`,
+    );
+
+    return {
+      batchId: batch.id,
+      deleted: true,
+      deletedInvoices: result.deletedInvoices,
+      deletedRetailProductImports: result.deletedRetailProductImports,
+    };
+  }
+
   async listInvoices(companyId: string, batchId?: string) {
     return this.prisma.xmlInvoice.findMany({
       where: {
