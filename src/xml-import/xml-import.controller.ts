@@ -2,8 +2,10 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -11,7 +13,11 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { DeleteXmlInvoicesDto } from './dto/delete-xml-invoices.dto';
 import { ImportXmlZipDto } from './dto/import-xml-zip.dto';
+import { LinkCostRecordDto } from './dto/link-cost-record.dto';
+import { LinkFuelRecordDto } from './dto/link-fuel-record.dto';
+import { LinkMaintenanceRecordDto } from './dto/link-maintenance-record.dto';
 import { XmlImportService } from './xml-import.service';
 
 @Controller('xml-import')
@@ -63,6 +69,23 @@ export class XmlImportController {
     return this.xmlImportService.listInvoices(companyId, batchId);
   }
 
+  @Delete('invoices')
+  deleteInvoices(@Req() req: any, @Body() dto: DeleteXmlInvoicesDto) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.deleteInvoices(companyId, dto.invoiceIds);
+  }
+
+  @Get('invoices/:id')
+  getInvoiceById(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Query('includeRawXml') includeRawXml?: string,
+  ) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    const shouldIncludeRawXml = String(includeRawXml || '').toLowerCase() === 'true';
+    return this.xmlImportService.getInvoiceById(companyId, id, shouldIncludeRawXml);
+  }
+
   @Post('invoices/:id/process/fuel')
   processInvoiceAsFuel(@Req() req: any, @Param('id') id: string) {
     const companyId = this.resolveCompanyIdFromUser(req);
@@ -79,6 +102,42 @@ export class XmlImportController {
   processInvoiceAsCost(@Req() req: any, @Param('id') id: string) {
     const companyId = this.resolveCompanyIdFromUser(req);
     return this.xmlImportService.processInvoiceAsCost(companyId, id);
+  }
+
+  @Post('invoices/:id/ignore')
+  ignoreInvoice(@Req() req: any, @Param('id') id: string) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.ignoreInvoice(companyId, id);
+  }
+
+  @Patch('invoices/:id/link/fuel')
+  completeFuelLink(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: LinkFuelRecordDto,
+  ) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.completeFuelLink(companyId, id, dto);
+  }
+
+  @Patch('invoices/:id/link/maintenance')
+  completeMaintenanceLink(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: LinkMaintenanceRecordDto,
+  ) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.completeMaintenanceLink(companyId, id, dto);
+  }
+
+  @Patch('invoices/:id/link/cost')
+  completeCostLink(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: LinkCostRecordDto,
+  ) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.completeCostLink(companyId, id, dto);
   }
 
   private resolveCompanyIdFromUser(req: any): string {

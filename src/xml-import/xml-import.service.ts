@@ -15,6 +15,9 @@ import {
 import AdmZip from 'adm-zip';
 import { XMLParser } from 'fast-xml-parser';
 import { posix } from 'path';
+import { LinkCostRecordDto } from './dto/link-cost-record.dto';
+import { LinkFuelRecordDto } from './dto/link-fuel-record.dto';
+import { LinkMaintenanceRecordDto } from './dto/link-maintenance-record.dto';
 import { PrismaService } from '../prisma/prisma.service';
 
 type ImportXmlZipInput = {
@@ -332,6 +335,151 @@ export class XmlImportService {
     });
   }
 
+  async deleteInvoices(companyId: string, invoiceIds: string[]) {
+    const uniqueIds = Array.from(
+      new Set(
+        (Array.isArray(invoiceIds) ? invoiceIds : [])
+          .map((id) => String(id || '').trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (uniqueIds.length === 0) {
+      throw new BadRequestException('Nenhuma nota informada para exclusao.');
+    }
+
+    const existing = await this.prisma.xmlInvoice.findMany({
+      where: {
+        companyId,
+        id: { in: uniqueIds },
+      },
+      select: { id: true },
+    });
+
+    const existingIds = new Set(existing.map((invoice) => invoice.id));
+    const notFoundIds = uniqueIds.filter((id) => !existingIds.has(id));
+
+    const deleted = await this.prisma.xmlInvoice.deleteMany({
+      where: {
+        companyId,
+        id: { in: uniqueIds },
+      },
+    });
+
+    this.logger.log(
+      `[xml-import] exclusao em lote companyId=${companyId} requested=${uniqueIds.length} deleted=${deleted.count}`,
+    );
+
+    return {
+      requested: uniqueIds.length,
+      deleted: deleted.count,
+      notFound: notFoundIds.length,
+      notFoundIds,
+    };
+  }
+
+  async getInvoiceById(companyId: string, invoiceId: string, includeRawXml = false) {
+    const invoice = await this.prisma.xmlInvoice.findFirst({
+      where: {
+        id: invoiceId,
+        companyId,
+      },
+      select: {
+        id: true,
+        batchId: true,
+        fileName: true,
+        folderName: true,
+        invoiceKey: true,
+        number: true,
+        series: true,
+        issuedAt: true,
+        issuerName: true,
+        issuerDocument: true,
+        recipientName: true,
+        recipientDocument: true,
+        totalAmount: true,
+        protocolNumber: true,
+        invoiceStatus: true,
+        processingType: true,
+        processingStatus: true,
+        processedAt: true,
+        linkedFuelRecordId: true,
+        linkedMaintenanceRecordId: true,
+        linkedCostId: true,
+        createdAt: true,
+        updatedAt: true,
+        rawXml: includeRawXml,
+        items: {
+          orderBy: {
+            createdAt: 'asc',
+          },
+          select: {
+            id: true,
+            productCode: true,
+            description: true,
+            quantity: true,
+            unitValue: true,
+            totalValue: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Nota XML nao encontrada para esta empresa.');
+    }
+
+    const [linkedFuelRecord, linkedMaintenanceRecord, linkedCost] = await Promise.all([
+      invoice.linkedFuelRecordId
+        ? this.prisma.fuelRecord.findUnique({
+            where: { id: invoice.linkedFuelRecordId },
+            select: {
+              id: true,
+              vehicleId: true,
+              driverId: true,
+              km: true,
+              fuelDate: true,
+              totalValue: true,
+            },
+          })
+        : Promise.resolve(null),
+      invoice.linkedMaintenanceRecordId
+        ? this.prisma.maintenanceRecord.findUnique({
+            where: { id: invoice.linkedMaintenanceRecordId },
+            select: {
+              id: true,
+              vehicleId: true,
+              description: true,
+              maintenanceDate: true,
+              status: true,
+              cost: true,
+            },
+          })
+        : Promise.resolve(null),
+      invoice.linkedCostId
+        ? this.prisma.debt.findUnique({
+            where: { id: invoice.linkedCostId },
+            select: {
+              id: true,
+              vehicleId: true,
+              category: true,
+              amount: true,
+              debtDate: true,
+              status: true,
+            },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    return {
+      ...invoice,
+      linkedFuelRecord,
+      linkedMaintenanceRecord,
+      linkedCost,
+    };
+  }
+
   async processInvoiceAsFuel(companyId: string, invoiceId: string) {
     const invoice = await this.getProcessableInvoice(companyId, invoiceId);
     const liters = this.sumInvoiceItemQuantity(invoice.items);
@@ -493,6 +641,236 @@ export class XmlImportService {
     };
   }
 
+  async ignoreInvoice(companyId: string, invoiceId: string) {
+    const invoice = await this.prisma.xmlInvoice.findFirst({
+      where: { id: invoiceId, companyId },
+      select: {
+        id: true,
+        processingStatus: true,
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Nota XML nao encontrada para esta empresa.');
+    }
+
+    if (invoice.processingStatus === XmlProcessingStatus.PROCESSED) {
+      throw new BadRequestException(
+        'Nao e permitido ignorar uma nota XML ja processada.',
+      );
+    }
+
+    const updated = await this.prisma.xmlInvoice.update({
+      where: { id: invoice.id },
+      data: {
+        processingStatus: XmlProcessingStatus.IGNORED,
+        processedAt: new Date(),
+      },
+      select: {
+        id: true,
+        processingStatus: true,
+        processedAt: true,
+      },
+    });
+
+    this.logger.log(
+      `[xml-import] invoiceId=${invoiceId} tipo=ignore status=${updated.processingStatus}`,
+    );
+
+    return {
+      invoiceId: updated.id,
+      processingStatus: updated.processingStatus,
+      processedAt: updated.processedAt,
+    };
+  }
+
+  async completeFuelLink(companyId: string, invoiceId: string, dto: LinkFuelRecordDto) {
+    const invoice = await this.getInvoiceForLink(companyId, invoiceId, 'fuel');
+
+    const vehicle = await this.requireVehicleFromCompany(dto.vehicleId, companyId);
+    const branchId = dto.branchId || vehicle.branchId;
+    await this.validateBranchId(branchId, companyId);
+
+    if (dto.driverId) {
+      await this.validateDriverForCompany(dto.driverId, companyId, dto.vehicleId);
+    }
+
+    const fuelRecord = await this.prisma.fuelRecord.findUnique({
+      where: { id: invoice.linkedFuelRecordId! },
+      select: { id: true, vehicleId: true },
+    });
+
+    if (!fuelRecord) {
+      throw new NotFoundException('Registro de abastecimento vinculado nao encontrado.');
+    }
+
+    if (fuelRecord.vehicleId) {
+      throw new BadRequestException('O vínculo do abastecimento já está completo.');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updatedFuel = await tx.fuelRecord.update({
+        where: { id: fuelRecord.id },
+        data: {
+          vehicleId: dto.vehicleId,
+          driverId: dto.driverId || null,
+          ...(typeof dto.km === 'number' ? { km: dto.km } : {}),
+        },
+        select: {
+          id: true,
+          vehicleId: true,
+          driverId: true,
+          km: true,
+        },
+      });
+
+      const updatedInvoice = await tx.xmlInvoice.update({
+        where: { id: invoice.id },
+        data: { branchId },
+        select: { id: true, branchId: true },
+      });
+
+      return { updatedFuel, updatedInvoice };
+    });
+
+    this.logger.log(
+      `[xml-import] invoiceId=${invoiceId} tipo=link-fuel fuelRecordId=${updated.updatedFuel.id}`,
+    );
+
+    return {
+      invoiceId: updated.updatedInvoice.id,
+      branchId: updated.updatedInvoice.branchId,
+      fuelRecord: updated.updatedFuel,
+    };
+  }
+
+  async completeMaintenanceLink(
+    companyId: string,
+    invoiceId: string,
+    dto: LinkMaintenanceRecordDto,
+  ) {
+    const invoice = await this.getInvoiceForLink(companyId, invoiceId, 'maintenance');
+
+    const vehicle = await this.requireVehicleFromCompany(dto.vehicleId, companyId);
+    const branchId = dto.branchId || vehicle.branchId;
+    await this.validateBranchId(branchId, companyId);
+
+    const maintenanceRecord = await this.prisma.maintenanceRecord.findUnique({
+      where: { id: invoice.linkedMaintenanceRecordId! },
+      select: { id: true, vehicleId: true, description: true },
+    });
+
+    if (!maintenanceRecord) {
+      throw new NotFoundException('Registro de manutencao vinculado nao encontrado.');
+    }
+
+    if (maintenanceRecord.vehicleId) {
+      throw new BadRequestException('O vínculo da manutenção já está completo.');
+    }
+
+    const nextDescription = dto.descriptionComplement
+      ? `${maintenanceRecord.description}\n${dto.descriptionComplement}`.trim()
+      : maintenanceRecord.description;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updatedMaintenance = await tx.maintenanceRecord.update({
+        where: { id: maintenanceRecord.id },
+        data: {
+          vehicleId: dto.vehicleId,
+          description: nextDescription,
+        },
+        select: {
+          id: true,
+          vehicleId: true,
+          description: true,
+        },
+      });
+
+      const updatedInvoice = await tx.xmlInvoice.update({
+        where: { id: invoice.id },
+        data: { branchId },
+        select: { id: true, branchId: true },
+      });
+
+      return { updatedMaintenance, updatedInvoice };
+    });
+
+    this.logger.log(
+      `[xml-import] invoiceId=${invoiceId} tipo=link-maintenance maintenanceRecordId=${updated.updatedMaintenance.id}`,
+    );
+
+    return {
+      invoiceId: updated.updatedInvoice.id,
+      branchId: updated.updatedInvoice.branchId,
+      maintenanceRecord: updated.updatedMaintenance,
+    };
+  }
+
+  async completeCostLink(companyId: string, invoiceId: string, dto: LinkCostRecordDto) {
+    const invoice = await this.getInvoiceForLink(companyId, invoiceId, 'cost');
+
+    const debt = await this.prisma.debt.findUnique({
+      where: { id: invoice.linkedCostId! },
+      select: { id: true, vehicleId: true, category: true },
+    });
+
+    if (!debt) {
+      throw new NotFoundException('Registro de custo vinculado nao encontrado.');
+    }
+
+    const nextVehicleId = dto.vehicleId || null;
+    if (nextVehicleId) {
+      const vehicle = await this.requireVehicleFromCompany(nextVehicleId, companyId);
+      const branchToValidate = dto.branchId || vehicle.branchId;
+      await this.validateBranchId(branchToValidate, companyId);
+    } else if (dto.branchId) {
+      await this.validateBranchId(dto.branchId, companyId);
+    }
+
+    const isAlreadyComplete =
+      Boolean(debt.vehicleId) &&
+      (invoice.branchId ? true : false);
+
+    if (isAlreadyComplete) {
+      throw new BadRequestException('O vínculo do custo já está completo.');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updatedDebt = await tx.debt.update({
+        where: { id: debt.id },
+        data: {
+          ...(nextVehicleId ? { vehicleId: nextVehicleId } : {}),
+          ...(dto.category ? { category: dto.category } : {}),
+        },
+        select: {
+          id: true,
+          vehicleId: true,
+          category: true,
+        },
+      });
+
+      const updatedInvoice = await tx.xmlInvoice.update({
+        where: { id: invoice.id },
+        data: {
+          ...(dto.branchId ? { branchId: dto.branchId } : {}),
+        },
+        select: { id: true, branchId: true },
+      });
+
+      return { updatedDebt, updatedInvoice };
+    });
+
+    this.logger.log(
+      `[xml-import] invoiceId=${invoiceId} tipo=link-cost costId=${updated.updatedDebt.id}`,
+    );
+
+    return {
+      invoiceId: updated.updatedInvoice.id,
+      branchId: updated.updatedInvoice.branchId,
+      costRecord: updated.updatedDebt,
+    };
+  }
+
   private async getProcessableInvoice(companyId: string, invoiceId: string) {
     const invoice = await this.prisma.xmlInvoice.findFirst({
       where: { id: invoiceId, companyId },
@@ -524,6 +902,114 @@ export class XmlImportService {
     }
 
     return invoice;
+  }
+
+  private async getInvoiceForLink(
+    companyId: string,
+    invoiceId: string,
+    target: 'fuel' | 'maintenance' | 'cost',
+  ) {
+    const invoice = await this.prisma.xmlInvoice.findFirst({
+      where: { id: invoiceId, companyId },
+      select: {
+        id: true,
+        branchId: true,
+        linkedFuelRecordId: true,
+        linkedMaintenanceRecordId: true,
+        linkedCostId: true,
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Nota XML nao encontrada para esta empresa.');
+    }
+
+    if (target === 'fuel' && !invoice.linkedFuelRecordId) {
+      throw new BadRequestException('Esta nota nao possui registro de abastecimento vinculado.');
+    }
+
+    if (target === 'maintenance' && !invoice.linkedMaintenanceRecordId) {
+      throw new BadRequestException('Esta nota nao possui registro de manutencao vinculado.');
+    }
+
+    if (target === 'cost' && !invoice.linkedCostId) {
+      throw new BadRequestException('Esta nota nao possui registro de custo vinculado.');
+    }
+
+    return invoice;
+  }
+
+  private async requireVehicleFromCompany(vehicleId: string, companyId: string) {
+    const vehicle = await this.prisma.vehicle.findFirst({
+      where: {
+        id: vehicleId,
+        branch: {
+          companyId,
+        },
+      },
+      select: {
+        id: true,
+        branchId: true,
+      },
+    });
+
+    if (!vehicle) {
+      throw new BadRequestException('Veiculo invalido para esta empresa.');
+    }
+
+    return vehicle;
+  }
+
+  private async validateBranchId(branchId: string, companyId: string) {
+    if (!branchId) return;
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, companyId },
+      select: { id: true },
+    });
+    if (!branch) {
+      throw new BadRequestException('Filial invalida para esta empresa.');
+    }
+  }
+
+  private async validateDriverForCompany(
+    driverId: string,
+    companyId: string,
+    vehicleId: string,
+  ) {
+    const driver = await this.prisma.driver.findUnique({
+      where: { id: driverId },
+      select: {
+        id: true,
+        vehicleId: true,
+        vehicle: {
+          select: {
+            id: true,
+            branch: {
+              select: {
+                companyId: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!driver) {
+      throw new BadRequestException('Motorista nao encontrado.');
+    }
+
+    if (
+      driver.vehicle?.branch?.companyId &&
+      driver.vehicle.branch.companyId !== companyId
+    ) {
+      throw new BadRequestException('Motorista invalido para esta empresa.');
+    }
+
+    if (driver.vehicleId && driver.vehicleId !== vehicleId) {
+      throw new BadRequestException(
+        'Motorista vinculado a outro veiculo. Selecione um motorista compativel.',
+      );
+    }
   }
 
   private async ensureBranchBelongsToCompany(branchId: string, companyId: string) {
