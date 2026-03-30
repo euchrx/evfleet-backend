@@ -959,12 +959,8 @@ export class XmlImportService {
             },
             select: { id: true },
           });
-        } catch (error) {
-          if (
-            error instanceof Prisma.PrismaClientKnownRequestError &&
-            error.code === 'P2002' &&
-            normalizedInvoiceNumber
-          ) {
+        } catch (error: any) {
+          if (this.isUniqueInvoiceNumberConflict(error) && normalizedInvoiceNumber) {
             const concurrentExistingId = await this.findFuelRecordIdByInvoiceNumberTx(
               tx,
               normalizedInvoiceNumber,
@@ -1566,10 +1562,7 @@ export class XmlImportService {
     const normalizedInvoiceNumber = this.toText(invoice.invoiceKey) || null;
     if (!normalizedInvoiceNumber) return null;
 
-    const existing = await this.prisma.fuelRecord.findFirst({
-      where: { invoiceNumber: normalizedInvoiceNumber },
-      select: { id: true, vehicleId: true },
-    });
+    const existing = await this.findFuelRecordByInvoiceNumber(normalizedInvoiceNumber);
 
     if (existing) {
       await this.prisma.xmlInvoice.update({
@@ -1605,15 +1598,11 @@ export class XmlImportService {
       });
 
       return created;
-    } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
-        const concurrentExisting = await this.prisma.fuelRecord.findFirst({
-          where: { invoiceNumber: normalizedInvoiceNumber },
-          select: { id: true, vehicleId: true },
-        });
+    } catch (error: any) {
+      if (this.isUniqueInvoiceNumberConflict(error)) {
+        const concurrentExisting = await this.findFuelRecordByInvoiceNumber(
+          normalizedInvoiceNumber,
+        );
         if (concurrentExisting) {
           await this.prisma.xmlInvoice.update({
             where: { id: invoice.id },
@@ -1624,6 +1613,35 @@ export class XmlImportService {
       }
       throw error;
     }
+  }
+
+  private isUniqueInvoiceNumberConflict(error: any): boolean {
+    const code = String(error?.code || '').trim();
+    if (code !== 'P2002') return false;
+    const target = Array.isArray(error?.meta?.target)
+      ? error.meta.target.map((item: unknown) => String(item))
+      : [];
+    return target.length === 0 || target.includes('invoiceNumber');
+  }
+
+  private async findFuelRecordByInvoiceNumber(invoiceNumber: string) {
+    const normalized = String(invoiceNumber || '').trim();
+    if (!normalized) return null;
+
+    const direct = await this.prisma.fuelRecord.findFirst({
+      where: { invoiceNumber: normalized },
+      select: { id: true, vehicleId: true },
+    });
+    if (direct) return direct;
+
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; vehicleId: string | null }>>`
+      SELECT "id", "vehicleId"
+      FROM "FuelRecord"
+      WHERE BTRIM(COALESCE("invoiceNumber", '')) = BTRIM(${normalized})
+      LIMIT 1
+    `;
+
+    return rows?.[0] || null;
   }
 
   private async requireVehicleFromCompany(vehicleId: string, companyId: string) {
