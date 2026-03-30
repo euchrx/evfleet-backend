@@ -19,6 +19,7 @@ import { MaintenanceRecordsModule } from './maintenance-records/maintenance-reco
 import { MenuVisibilityModule } from './menu-visibility/menu-visibility.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ReportsModule } from './reports/reports.module';
+import { RetailProductsModule } from './retail-products/retail-products.module';
 import { SystemResetModule } from './system-reset/system-reset.module';
 import { TiresModule } from './tires/tires.module';
 import { TripsModule } from './trips/trips.module';
@@ -38,6 +39,7 @@ import { XmlImportModule } from './xml-import/xml-import.module';
     DriversModule,
     MaintenanceRecordsModule,
     ReportsModule,
+    RetailProductsModule,
     DebtsModule,
     FuelRecordsModule,
     MaintenancePlansModule,

@@ -2,10 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
-  Delete,
   Get,
-  Param,
-  Patch,
   Post,
   Query,
   Req,
@@ -13,33 +10,12 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { FuelRecordsService } from './fuel-records.service';
-import { CreateFuelRecordDto } from './dto/create-fuel-record.dto';
-import { UpdateFuelRecordDto } from './dto/update-fuel-record.dto';
 import { ImportXmlZipDto } from '../xml-import/dto/import-xml-zip.dto';
 import { XmlImportService } from '../xml-import/xml-import.service';
 
-@Controller('fuel-records')
-export class FuelRecordsController {
-  constructor(
-    private readonly fuelRecordsService: FuelRecordsService,
-    private readonly xmlImportService: XmlImportService,
-  ) {}
-
-  @Post()
-  create(@Body() dto: CreateFuelRecordDto) {
-    return this.fuelRecordsService.create(dto);
-  }
-
-  @Get()
-  findAll() {
-    return this.fuelRecordsService.findAll();
-  }
-
-  @Get('insights')
-  getInsights() {
-    return this.fuelRecordsService.getInsights();
-  }
+@Controller('retail-products')
+export class RetailProductsController {
+  constructor(private readonly xmlImportService: XmlImportService) {}
 
   @Post('import-xml')
   @UseInterceptors(FileInterceptor('file'))
@@ -63,7 +39,7 @@ export class FuelRecordsController {
       periodLabel: dto.periodLabel,
       fileName: file.originalname || 'importacao.zip',
       zipBuffer: file.buffer,
-      domain: 'FUEL',
+      domain: 'RETAIL_PRODUCT',
     });
   }
 
@@ -79,29 +55,9 @@ export class FuelRecordsController {
   ) {
     return this.xmlImportService.listInvoicesByDomain(
       this.resolveCompanyIdFromUser(req),
-      'FUEL',
+      'RETAIL_PRODUCT',
       { period, issuerName, number, processingStatus, dateFrom, dateTo },
     );
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.fuelRecordsService.findOne(id);
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateFuelRecordDto) {
-    return this.fuelRecordsService.update(id, dto);
-  }
-
-  @Patch(':id/acknowledge-anomaly')
-  acknowledgeAnomaly(@Param('id') id: string) {
-    return this.fuelRecordsService.acknowledgeAnomaly(id);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.fuelRecordsService.remove(id);
   }
 
   private resolveCompanyIdFromUser(req: any): string {
@@ -114,3 +70,4 @@ export class FuelRecordsController {
     return companyId;
   }
 }
+

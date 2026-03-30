@@ -29,6 +29,22 @@ type ImportXmlZipInput = {
   periodLabel?: string;
 };
 
+type XmlDomain = 'FUEL' | 'MAINTENANCE' | 'RETAIL_PRODUCT';
+
+type ImportXmlZipByDomainInput = ImportXmlZipInput & {
+  domain: XmlDomain;
+  autoProcess?: boolean;
+};
+
+type DomainInvoiceFilters = {
+  period?: string;
+  issuerName?: string;
+  number?: string;
+  processingStatus?: string;
+  dateFrom?: string;
+  dateTo?: string;
+};
+
 type ListRetailProductImportsFilters = {
   dateFrom?: string;
   dateTo?: string;
@@ -214,6 +230,168 @@ export class XmlImportService {
       duplicateFiles: updatedBatch.duplicateFiles,
       errorFiles: updatedBatch.errorFiles,
     };
+  }
+
+  async importZipByDomain(input: ImportXmlZipByDomainInput) {
+    const baseSummary = await this.importZip(input);
+    const { allowedTypes, processKind } = this.getDomainDefinition(input.domain);
+    const shouldAutoProcess = input.autoProcess === true;
+
+    const batchInvoices = await this.prisma.xmlInvoice.findMany({
+      where: {
+        companyId: input.companyId,
+        batchId: baseSummary.batchId,
+      },
+      select: {
+        id: true,
+        processingType: true,
+        processingStatus: true,
+      },
+    });
+
+    const eligibleInvoices = batchInvoices.filter((invoice) =>
+      allowedTypes.includes(invoice.processingType),
+    );
+    const eligibleDomainInvoices = eligibleInvoices.length;
+    const ignoredByDomainFilter = Math.max(
+      0,
+      baseSummary.importedFiles - eligibleDomainInvoices,
+    );
+
+    let autoProcessed = 0;
+    let autoProcessErrors = 0;
+
+    if (shouldAutoProcess) {
+      for (const invoice of eligibleInvoices) {
+        if (invoice.processingStatus === XmlProcessingStatus.PROCESSED) continue;
+        if (invoice.processingStatus === XmlProcessingStatus.IGNORED) continue;
+
+        try {
+          if (processKind === 'fuel') {
+            await this.processInvoiceAsFuel(input.companyId, invoice.id);
+          } else if (processKind === 'maintenance') {
+            await this.processInvoiceAsMaintenance(input.companyId, invoice.id);
+          } else {
+            await this.processInvoiceAsRetailProduct(input.companyId, invoice.id);
+          }
+          autoProcessed += 1;
+        } catch (error) {
+          autoProcessErrors += 1;
+          this.logger.warn(
+            `[xml-import] dominio=${input.domain} invoiceId=${invoice.id} falha no processamento: ${
+              error instanceof Error ? error.message : 'erro desconhecido'
+            }`,
+          );
+        }
+      }
+    }
+
+    return {
+      ...baseSummary,
+      domain: input.domain,
+      eligibleDomainInvoices,
+      ignoredByDomainFilter,
+      processingMode: shouldAutoProcess ? 'AUTO_PROCESSED' : 'SUGGESTED_REVIEW',
+      autoProcessed,
+      autoProcessErrors,
+    };
+  }
+
+  async listInvoicesByDomain(
+    companyId: string,
+    domain: XmlDomain,
+    filters: DomainInvoiceFilters = {},
+  ) {
+    const { allowedTypes } = this.getDomainDefinition(domain);
+    const period = String(filters.period || '').trim();
+    const issuerName = String(filters.issuerName || '').trim();
+    const number = String(filters.number || '').trim();
+    const processingStatus = String(filters.processingStatus || '').trim();
+    const dateFrom = this.toDate(filters.dateFrom);
+    const dateTo = this.toDate(filters.dateTo);
+
+    const issuedAtFilter: { gte?: Date; lte?: Date } = {};
+    if (dateFrom) {
+      issuedAtFilter.gte = new Date(
+        dateFrom.getFullYear(),
+        dateFrom.getMonth(),
+        dateFrom.getDate(),
+        0,
+        0,
+        0,
+        0,
+      );
+    }
+    if (dateTo) {
+      issuedAtFilter.lte = new Date(
+        dateTo.getFullYear(),
+        dateTo.getMonth(),
+        dateTo.getDate(),
+        23,
+        59,
+        59,
+        999,
+      );
+    }
+
+    const periodRange = this.resolvePeriodRange(period);
+
+    return this.prisma.xmlInvoice.findMany({
+      where: {
+        companyId,
+        processingType: { in: allowedTypes },
+        ...(issuerName
+          ? { issuerName: { contains: issuerName, mode: 'insensitive' } }
+          : {}),
+        ...(number ? { number: { contains: number, mode: 'insensitive' } } : {}),
+        ...(processingStatus
+          ? { processingStatus: processingStatus as XmlProcessingStatus }
+          : {}),
+        ...(Object.keys(issuedAtFilter).length > 0
+          ? { issuedAt: issuedAtFilter }
+          : {}),
+        ...(periodRange
+          ? {
+              OR: [
+                { issuedAt: { gte: periodRange.start, lte: periodRange.end } },
+                { folderName: { contains: periodRange.compact, mode: 'insensitive' } },
+                { folderName: { contains: periodRange.slash, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ issuedAt: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        batchId: true,
+        fileName: true,
+        folderName: true,
+        invoiceKey: true,
+        number: true,
+        series: true,
+        issuedAt: true,
+        issuerName: true,
+        issuerDocument: true,
+        recipientName: true,
+        recipientDocument: true,
+        totalAmount: true,
+        protocolNumber: true,
+        invoiceStatus: true,
+        processingType: true,
+        processingStatus: true,
+        processedAt: true,
+        linkedFuelRecordId: true,
+        linkedMaintenanceRecordId: true,
+        linkedCostId: true,
+        linkedRetailProductImportId: true,
+        createdAt: true,
+        _count: {
+          select: {
+            items: true,
+          },
+        },
+      },
+    });
   }
 
   async listBatches(companyId: string) {
@@ -1554,5 +1732,55 @@ export class XmlImportService {
     if (!text) return undefined;
     const noPrefix = text.toUpperCase().startsWith('NFE') ? text.slice(3) : text;
     return this.onlyDigits(noPrefix);
+  }
+
+  private getDomainDefinition(domain: XmlDomain): {
+    allowedTypes: XmlProcessingType[];
+    processKind: 'fuel' | 'maintenance' | 'retail';
+  } {
+    if (domain === 'FUEL') {
+      return {
+        allowedTypes: [XmlProcessingType.FUEL],
+        processKind: 'fuel',
+      };
+    }
+    if (domain === 'MAINTENANCE') {
+      return {
+        allowedTypes: [XmlProcessingType.PRODUCT, XmlProcessingType.SERVICE],
+        processKind: 'maintenance',
+      };
+    }
+    return {
+      allowedTypes: [XmlProcessingType.RETAIL_PRODUCT],
+      processKind: 'retail',
+    };
+  }
+
+  private resolvePeriodRange(period: string): {
+    start: Date;
+    end: Date;
+    compact: string;
+    slash: string;
+  } | null {
+    const normalized = String(period || '').trim();
+    if (!normalized) return null;
+
+    const match = normalized.match(/^(\d{4})[\/-]?(\d{2})$/);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+    if (month < 1 || month > 12) return null;
+
+    const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const end = new Date(year, month, 0, 23, 59, 59, 999);
+
+    return {
+      start,
+      end,
+      compact: `${String(year)}${String(month).padStart(2, '0')}`,
+      slash: `${String(year)}/${String(month).padStart(2, '0')}`,
+    };
   }
 }
