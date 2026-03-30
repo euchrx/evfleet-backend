@@ -63,6 +63,24 @@ export class XmlImportController {
     return this.xmlImportService.listInvoices(companyId, batchId);
   }
 
+  @Post('invoices/:id/process/fuel')
+  processInvoiceAsFuel(@Req() req: any, @Param('id') id: string) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.processInvoiceAsFuel(companyId, id);
+  }
+
+  @Post('invoices/:id/process/maintenance')
+  processInvoiceAsMaintenance(@Req() req: any, @Param('id') id: string) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.processInvoiceAsMaintenance(companyId, id);
+  }
+
+  @Post('invoices/:id/process/cost')
+  processInvoiceAsCost(@Req() req: any, @Param('id') id: string) {
+    const companyId = this.resolveCompanyIdFromUser(req);
+    return this.xmlImportService.processInvoiceAsCost(companyId, id);
+  }
+
   private resolveCompanyIdFromUser(req: any): string {
     const companyId = String(req?.user?.companyId || '').trim();
     if (!companyId) {
