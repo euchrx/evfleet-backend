@@ -36,6 +36,21 @@ type ImportXmlZipByDomainInput = ImportXmlZipInput & {
   autoProcess?: boolean;
 };
 
+type FuelImportPreviewInput = ImportXmlZipInput;
+
+type ConfirmFuelImportItemInput = {
+  invoiceKey: string;
+  vehicleId?: string;
+  driverId?: string;
+  km?: number;
+  branchId?: string;
+};
+
+type ConfirmFuelImportInput = {
+  companyId: string;
+  imports: ConfirmFuelImportItemInput[];
+};
+
 type DomainInvoiceFilters = {
   period?: string;
   issuerName?: string;
@@ -294,6 +309,195 @@ export class XmlImportService {
       processingMode: shouldAutoProcess ? 'AUTO_PROCESSED' : 'SUGGESTED_REVIEW',
       autoProcessed,
       autoProcessErrors,
+    };
+  }
+
+  async previewFuelImport(input: FuelImportPreviewInput) {
+    const baseSummary = await this.importZip(input);
+
+    const batchInvoices = await this.prisma.xmlInvoice.findMany({
+      where: {
+        companyId: input.companyId,
+        batchId: baseSummary.batchId,
+      },
+      select: {
+        id: true,
+        invoiceKey: true,
+        number: true,
+        series: true,
+        issuedAt: true,
+        issuerName: true,
+        totalAmount: true,
+        branchId: true,
+        processingType: true,
+        processingStatus: true,
+        linkedFuelRecordId: true,
+        items: {
+          select: {
+            description: true,
+            quantity: true,
+            unitValue: true,
+            totalValue: true,
+          },
+        },
+      },
+    });
+
+    const fuelInvoices = batchInvoices.filter(
+      (invoice) => invoice.processingType === XmlProcessingType.FUEL,
+    );
+
+    const nonFuelCount = Math.max(0, batchInvoices.length - fuelInvoices.length);
+    const existingInvoiceNumbers = await this.findExistingFuelInvoiceNumbers(
+      fuelInvoices.map((invoice) => invoice.invoiceKey),
+    );
+
+    const eligibleInvoices = fuelInvoices.filter((invoice) => {
+      if (invoice.processingStatus === XmlProcessingStatus.PROCESSED) return false;
+      if (invoice.linkedFuelRecordId) return false;
+      return !existingInvoiceNumbers.has(invoice.invoiceKey);
+    });
+
+    const ignoredFuelAlreadyProcessedOrCreated = Math.max(
+      0,
+      fuelInvoices.length - eligibleInvoices.length,
+    );
+
+    return {
+      totalFiles: baseSummary.totalFiles,
+      eligibleCount: eligibleInvoices.length,
+      ignoredDuplicates: baseSummary.duplicateFiles + ignoredFuelAlreadyProcessedOrCreated,
+      ignoredNonFuel: nonFuelCount,
+      previewItems: eligibleInvoices.map((invoice) => ({
+        invoiceKey: invoice.invoiceKey,
+        issuerName: invoice.issuerName,
+        number: invoice.number,
+        series: invoice.series,
+        issuedAt: invoice.issuedAt,
+        totalAmount: this.decimalToNumber(invoice.totalAmount),
+        items: invoice.items.map((item) => ({
+          description: this.toText(item.description) || 'Item sem descricao',
+          quantity: this.toNumber(item.quantity) ?? 0,
+          unitValue: this.toNumber(item.unitValue) ?? 0,
+          totalValue: this.toNumber(item.totalValue) ?? 0,
+        })),
+        suggestedBranchId: invoice.branchId || input.branchId || null,
+        xmlInvoiceId: invoice.id,
+        alreadyExists: false,
+      })),
+    };
+  }
+
+  async confirmFuelImport(input: ConfirmFuelImportInput) {
+    const companyId = String(input.companyId || '').trim();
+    if (!companyId) {
+      throw new BadRequestException('companyId obrigatorio para confirmar importacao.');
+    }
+
+    const imports = Array.isArray(input.imports) ? input.imports : [];
+    if (imports.length === 0) {
+      throw new BadRequestException('Nenhum item informado para confirmacao.');
+    }
+
+    const uniqueImports = Array.from(
+      new Map(
+        imports.map((item) => [String(item.invoiceKey || '').trim(), item]),
+      ).values(),
+    ).filter((item) => String(item.invoiceKey || '').trim().length > 0);
+
+    if (uniqueImports.length === 0) {
+      throw new BadRequestException('Nenhuma invoiceKey valida foi informada.');
+    }
+
+    let createdCount = 0;
+    let ignoredCount = 0;
+    const createdIds: string[] = [];
+
+    for (const item of uniqueImports) {
+      const invoiceKey = String(item.invoiceKey || '').trim();
+
+      const invoice = await this.prisma.xmlInvoice.findFirst({
+        where: {
+          companyId,
+          invoiceKey,
+        },
+        orderBy: [{ createdAt: 'desc' }],
+        select: {
+          id: true,
+          invoiceKey: true,
+          processingType: true,
+          processingStatus: true,
+          linkedFuelRecordId: true,
+        },
+      });
+
+      if (!invoice) {
+        ignoredCount += 1;
+        continue;
+      }
+
+      if (invoice.processingType !== XmlProcessingType.FUEL) {
+        ignoredCount += 1;
+        continue;
+      }
+
+      if (invoice.processingStatus === XmlProcessingStatus.PROCESSED) {
+        ignoredCount += 1;
+        continue;
+      }
+
+      const existingFuelRecord = await this.findFuelRecordByInvoiceNumber(invoice.invoiceKey);
+
+      if (existingFuelRecord) {
+        await this.prisma.xmlInvoice.update({
+          where: { id: invoice.id },
+          data: {
+            processingStatus: XmlProcessingStatus.PROCESSED,
+            processedAt: new Date(),
+            linkedFuelRecordId: existingFuelRecord.id,
+            ...(item.branchId ? { branchId: item.branchId } : {}),
+          },
+        });
+
+        if (item.vehicleId) {
+          await this.completeFuelLink(companyId, invoice.id, {
+            vehicleId: item.vehicleId,
+            driverId: item.driverId,
+            km: item.km,
+            branchId: item.branchId,
+          });
+        }
+
+        createdCount += 1;
+        createdIds.push(existingFuelRecord.id);
+        continue;
+      }
+
+      const processed = await this.processInvoiceAsFuel(companyId, invoice.id);
+
+      if (item.vehicleId) {
+        await this.completeFuelLink(companyId, invoice.id, {
+          vehicleId: item.vehicleId,
+          driverId: item.driverId,
+          km: item.km,
+          branchId: item.branchId,
+        });
+      } else if (item.branchId) {
+        await this.validateBranchId(item.branchId, companyId);
+        await this.prisma.xmlInvoice.update({
+          where: { id: invoice.id },
+          data: { branchId: item.branchId },
+        });
+      }
+
+      createdCount += 1;
+      createdIds.push(processed.createdRecordId);
+    }
+
+    return {
+      createdCount,
+      ignoredCount,
+      createdIds,
     };
   }
 
@@ -1622,6 +1826,39 @@ export class XmlImportService {
       ? error.meta.target.map((item: unknown) => String(item))
       : [];
     return target.length === 0 || target.includes('invoiceNumber');
+  }
+
+  private async findExistingFuelInvoiceNumbers(
+    invoiceNumbers: string[],
+  ): Promise<Set<string>> {
+    const normalizedInvoiceNumbers = Array.from(
+      new Set(
+        invoiceNumbers
+          .map((invoiceNumber) => String(invoiceNumber || '').trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (normalizedInvoiceNumbers.length === 0) {
+      return new Set<string>();
+    }
+
+    const existing = await this.prisma.fuelRecord.findMany({
+      where: {
+        invoiceNumber: {
+          in: normalizedInvoiceNumbers,
+        },
+      },
+      select: {
+        invoiceNumber: true,
+      },
+    });
+
+    return new Set(
+      existing
+        .map((item) => String(item.invoiceNumber || '').trim())
+        .filter(Boolean),
+    );
   }
 
   private async findFuelRecordByInvoiceNumber(invoiceNumber: string) {

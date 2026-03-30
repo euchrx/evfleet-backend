@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { FuelRecordsService } from './fuel-records.service';
 import { CreateFuelRecordDto } from './dto/create-fuel-record.dto';
 import { UpdateFuelRecordDto } from './dto/update-fuel-record.dto';
+import { ConfirmFuelXmlImportDto } from './dto/confirm-fuel-xml-import.dto';
 import { ImportXmlZipDto } from '../xml-import/dto/import-xml-zip.dto';
 import { LinkFuelRecordDto } from '../xml-import/dto/link-fuel-record.dto';
 import { XmlImportService } from '../xml-import/xml-import.service';
@@ -42,6 +43,31 @@ export class FuelRecordsController {
     return this.fuelRecordsService.getInsights();
   }
 
+  @Post('import-xml/preview')
+  @UseInterceptors(FileInterceptor('file'))
+  previewImportXml(
+    @UploadedFile() file: { buffer?: Buffer; originalname?: string } | undefined,
+    @Body() dto: ImportXmlZipDto,
+    @Req() req: any,
+  ) {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Envie um arquivo ZIP valido no campo file.');
+    }
+
+    const fileName = String(file.originalname || '').trim();
+    if (!fileName.toLowerCase().endsWith('.zip')) {
+      throw new BadRequestException('O arquivo enviado deve ser um ZIP.');
+    }
+
+    return this.xmlImportService.previewFuelImport({
+      companyId: this.resolveCompanyIdFromUser(req),
+      branchId: dto.branchId,
+      periodLabel: dto.periodLabel,
+      fileName: file.originalname || 'importacao.zip',
+      zipBuffer: file.buffer,
+    });
+  }
+
   @Post('import-xml')
   @UseInterceptors(FileInterceptor('file'))
   importXml(
@@ -65,6 +91,17 @@ export class FuelRecordsController {
       fileName: file.originalname || 'importacao.zip',
       zipBuffer: file.buffer,
       domain: 'FUEL',
+    });
+  }
+
+  @Post('import-xml/confirm')
+  confirmImportXml(
+    @Body() dto: ConfirmFuelXmlImportDto,
+    @Req() req: any,
+  ) {
+    return this.xmlImportService.confirmFuelImport({
+      companyId: this.resolveCompanyIdFromUser(req),
+      imports: dto.imports,
     });
   }
 
