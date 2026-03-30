@@ -1480,8 +1480,12 @@ export class XmlImportService {
     invoiceId: string,
     target: 'fuel' | 'maintenance' | 'cost',
   ) {
+    const normalizedInvoiceRef = String(invoiceId || '').trim();
     const invoice = await this.prisma.xmlInvoice.findFirst({
-      where: { id: invoiceId, companyId },
+      where: {
+        companyId,
+        OR: [{ id: normalizedInvoiceRef }, { invoiceKey: normalizedInvoiceRef }],
+      },
       select: {
         id: true,
         branchId: true,
