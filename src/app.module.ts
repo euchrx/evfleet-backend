@@ -25,6 +25,7 @@ import { TripsModule } from './trips/trips.module';
 import { UsersModule } from './users/users.module';
 import { VehicleDocumentsModule } from './vehicle-documents/vehicle-documents.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
+import { XmlImportModule } from './xml-import/xml-import.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { VehiclesModule } from './vehicles/vehicles.module';
     MenuVisibilityModule,
     SystemResetModule,
     BillingModule,
+    XmlImportModule,
     ConfigModule.forRoot({ isGlobal: true }),
   ],
   controllers: [AppController],

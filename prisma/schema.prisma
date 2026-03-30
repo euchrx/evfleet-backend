@@ -28,6 +28,8 @@ model Company {
   subscriptions Subscription[]
   payments      Payment[]
   webhookEvents WebhookEvent[]
+  xmlImportBatches XmlImportBatch[]
+  xmlInvoices      XmlInvoice[]
 
   @@index([active])
 }
@@ -43,6 +45,8 @@ model Branch {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   vehicles Vehicle[]
+  xmlImportBatches XmlImportBatch[]
+  xmlInvoices      XmlInvoice[]
 
   @@index([companyId])
 }
@@ -450,6 +454,21 @@ enum WebhookProcessStatus {
   FAILED
 }
 
+enum XmlImportBatchStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
+}
+
+enum XmlInvoiceStatus {
+  AUTHORIZED
+  CANCELED
+  DENIED
+  UNKNOWN
+}
+
 model Plan {
   id          String       @id @default(uuid())
   code        String       @unique
@@ -545,4 +564,81 @@ model WebhookEvent {
   @@index([companyId])
   @@index([subscriptionId])
   @@index([processStatus])
+}
+
+model XmlImportBatch {
+  id             String               @id @default(uuid())
+  fileName       String
+  periodLabel    String?
+  status         XmlImportBatchStatus @default(PENDING)
+  totalFiles     Int                  @default(0)
+  importedFiles  Int                  @default(0)
+  duplicateFiles Int                  @default(0)
+  errorFiles     Int                  @default(0)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  invoices XmlInvoice[]
+
+  @@index([companyId])
+  @@index([branchId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model XmlInvoice {
+  id                String           @id @default(uuid())
+  fileName          String
+  folderName        String?
+  invoiceKey        String           @unique
+  number            String?
+  series            String?
+  issuedAt          DateTime?
+  issuerName        String?
+  issuerDocument    String?
+  recipientName     String?
+  recipientDocument String?
+  totalAmount       Decimal?         @db.Decimal(14, 2)
+  protocolNumber    String?
+  invoiceStatus     XmlInvoiceStatus @default(UNKNOWN)
+  rawXml            String
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  batchId String
+  batch   XmlImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  items XmlInvoiceItem[]
+
+  @@index([batchId])
+  @@index([companyId])
+  @@index([branchId])
+  @@index([issuedAt])
+}
+
+model XmlInvoiceItem {
+  id          String   @id @default(uuid())
+  productCode String?
+  description String
+  quantity    Decimal? @db.Decimal(14, 4)
+  unitValue   Decimal? @db.Decimal(14, 4)
+  totalValue  Decimal? @db.Decimal(14, 2)
+  createdAt   DateTime @default(now())
+
+  invoiceId String
+  invoice   XmlInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
 }
