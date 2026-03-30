@@ -178,7 +178,7 @@ export class XmlImportController {
   }
 
   private resolveCompanyIdFromUser(req: any): string {
-    const companyId = String(req?.user?.companyId || '').trim();
+    const companyId = String(req?.companyScopeId || req?.user?.companyId || '').trim();
     if (!companyId) {
       throw new BadRequestException(
         'Usuario autenticado sem companyId para importacao XML.',
