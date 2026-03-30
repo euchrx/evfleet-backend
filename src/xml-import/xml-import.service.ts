@@ -1267,17 +1267,12 @@ export class XmlImportService {
     });
 
     if (!fuelRecord) {
-      const fallbackFuelRecord = await this.prisma.fuelRecord.findFirst({
-        where: { invoiceNumber: invoice.invoiceKey || undefined },
-        select: { id: true, vehicleId: true },
-      });
-
-      if (fallbackFuelRecord) {
-        await this.prisma.xmlInvoice.update({
-          where: { id: invoice.id },
-          data: { linkedFuelRecordId: fallbackFuelRecord.id },
-        });
-        fuelRecord = fallbackFuelRecord;
+      const ensuredFuelRecord = await this.ensureFuelRecordLinkedFromInvoice(invoice.id);
+      if (ensuredFuelRecord) {
+        fuelRecord = {
+          id: ensuredFuelRecord.id,
+          vehicleId: ensuredFuelRecord.vehicleId,
+        };
       }
     }
 
@@ -1504,10 +1499,19 @@ export class XmlImportService {
       select: {
         id: true,
         invoiceKey: true,
+        issuedAt: true,
+        issuerName: true,
+        totalAmount: true,
         branchId: true,
         linkedFuelRecordId: true,
         linkedMaintenanceRecordId: true,
         linkedCostId: true,
+        items: {
+          select: {
+            description: true,
+            quantity: true,
+          },
+        },
       },
     });
 
@@ -1528,6 +1532,98 @@ export class XmlImportService {
     }
 
     return invoice;
+  }
+
+  private async ensureFuelRecordLinkedFromInvoice(invoiceId: string) {
+    const invoice = await this.prisma.xmlInvoice.findUnique({
+      where: { id: invoiceId },
+      select: {
+        id: true,
+        invoiceKey: true,
+        issuedAt: true,
+        issuerName: true,
+        totalAmount: true,
+        linkedFuelRecordId: true,
+        items: {
+          select: {
+            description: true,
+            quantity: true,
+          },
+        },
+      },
+    });
+
+    if (!invoice) return null;
+
+    if (invoice.linkedFuelRecordId) {
+      const linked = await this.prisma.fuelRecord.findUnique({
+        where: { id: invoice.linkedFuelRecordId },
+        select: { id: true, vehicleId: true },
+      });
+      if (linked) return linked;
+    }
+
+    const normalizedInvoiceNumber = this.toText(invoice.invoiceKey) || null;
+    if (!normalizedInvoiceNumber) return null;
+
+    const existing = await this.prisma.fuelRecord.findFirst({
+      where: { invoiceNumber: normalizedInvoiceNumber },
+      select: { id: true, vehicleId: true },
+    });
+
+    if (existing) {
+      await this.prisma.xmlInvoice.update({
+        where: { id: invoice.id },
+        data: { linkedFuelRecordId: existing.id },
+      });
+      return existing;
+    }
+
+    const liters = this.sumInvoiceItemQuantity(invoice.items as any[]);
+    const totalValue = this.decimalToNumber(invoice.totalAmount as any);
+    const fuelType = this.inferFuelTypeFromItems(invoice.items as any[]);
+
+    try {
+      const created = await this.prisma.fuelRecord.create({
+        data: {
+          invoiceNumber: normalizedInvoiceNumber,
+          liters,
+          totalValue,
+          km: 0,
+          station: invoice.issuerName || 'Fornecedor nao informado',
+          fuelType,
+          fuelDate: invoice.issuedAt || new Date(),
+          vehicleId: null,
+          driverId: null,
+        },
+        select: { id: true, vehicleId: true },
+      });
+
+      await this.prisma.xmlInvoice.update({
+        where: { id: invoice.id },
+        data: { linkedFuelRecordId: created.id },
+      });
+
+      return created;
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const concurrentExisting = await this.prisma.fuelRecord.findFirst({
+          where: { invoiceNumber: normalizedInvoiceNumber },
+          select: { id: true, vehicleId: true },
+        });
+        if (concurrentExisting) {
+          await this.prisma.xmlInvoice.update({
+            where: { id: invoice.id },
+            data: { linkedFuelRecordId: concurrentExisting.id },
+          });
+          return concurrentExisting;
+        }
+      }
+      throw error;
+    }
   }
 
   private async requireVehicleFromCompany(vehicleId: string, companyId: string) {
