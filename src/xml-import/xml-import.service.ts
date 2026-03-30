@@ -1261,10 +1261,25 @@ export class XmlImportService {
       await this.validateDriverForCompany(dto.driverId, companyId, dto.vehicleId);
     }
 
-    const fuelRecord = await this.prisma.fuelRecord.findUnique({
+    let fuelRecord = await this.prisma.fuelRecord.findUnique({
       where: { id: invoice.linkedFuelRecordId! },
       select: { id: true, vehicleId: true },
     });
+
+    if (!fuelRecord) {
+      const fallbackFuelRecord = await this.prisma.fuelRecord.findFirst({
+        where: { invoiceNumber: invoice.invoiceKey || undefined },
+        select: { id: true, vehicleId: true },
+      });
+
+      if (fallbackFuelRecord) {
+        await this.prisma.xmlInvoice.update({
+          where: { id: invoice.id },
+          data: { linkedFuelRecordId: fallbackFuelRecord.id },
+        });
+        fuelRecord = fallbackFuelRecord;
+      }
+    }
 
     if (!fuelRecord) {
       throw new NotFoundException('Registro de abastecimento vinculado nao encontrado.');
@@ -1488,6 +1503,7 @@ export class XmlImportService {
       },
       select: {
         id: true,
+        invoiceKey: true,
         branchId: true,
         linkedFuelRecordId: true,
         linkedMaintenanceRecordId: true,
