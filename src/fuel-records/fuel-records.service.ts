@@ -175,8 +175,13 @@ export class FuelRecordsService {
       (acc, invoice) => acc + invoice.items.length,
       0,
     );
+    const totalGroups = invoices.reduce(
+      (acc, invoice) => acc + invoice.consolidated.length,
+      0,
+    );
     const totalDuplicados = invoices.reduce(
-      (acc, invoice) => acc + invoice.items.filter((item) => item.duplicate).length,
+      (acc, invoice) =>
+        acc + invoice.consolidated.filter((group) => group.duplicate).length,
       0,
     );
 
@@ -184,49 +189,58 @@ export class FuelRecordsService {
     let totalIgnorados = 0;
 
     for (const invoice of invoices) {
-      for (const item of invoice.items) {
-        if (!item.selected) {
-          if (!item.duplicate) {
-            totalIgnorados += 1;
-          }
+      const vehicle = await this.resolveVehicleForImport(
+        normalizedCompanyId,
+        invoice.plate,
+      );
+
+      for (const group of invoice.consolidated) {
+        if (!group.selected) {
+          if (!group.duplicate) totalIgnorados += 1;
           continue;
         }
 
-        if (!item.importable || item.duplicate) {
-          if (!item.duplicate) {
-            totalIgnorados += 1;
-          }
+        if (!group.importable || group.duplicate) {
+          if (!group.duplicate) totalIgnorados += 1;
           continue;
         }
 
-        const duplicateCheck = await this.xmlImportService.findFuelImportDuplicate({
+        const duplicateCheck =
+          await this.xmlImportService.findFuelImportGroupDuplicate({
           companyId: normalizedCompanyId,
           invoiceKey: invoice.invoiceKey,
-          invoiceNumber: invoice.invoiceNumber,
-          lineIndex: item.lineIndex,
-          productCode: item.productCode,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
           plate: invoice.plate,
-          fuelDateTime: item.fuelDateTime ? new Date(item.fuelDateTime) : undefined,
+          fuelType: group.fuelType,
         });
 
         if (duplicateCheck.duplicate) {
           continue;
         }
 
-        const vehicle = await this.resolveVehicleForImport(
-          normalizedCompanyId,
-          invoice.plate,
-        );
         if (!vehicle) {
           totalIgnorados += 1;
           continue;
         }
 
+        const sourceItems = invoice.items.filter((item) => {
+          if (!item.importable || item.detectedType === 'OTHER') return false;
+          if (group.detectedType === 'ARLA') {
+            return item.detectedType === 'ARLA';
+          }
+          return (
+            item.detectedType === 'FUEL' &&
+            String(item.detectedFuelType || '').trim().toUpperCase() ===
+              String(group.fuelType || '').trim().toUpperCase()
+          );
+        });
+
+        if (sourceItems.length === 0) {
+          totalIgnorados += 1;
+          continue;
+        }
+
         try {
-          await this.createImportedFuelRecord({
-            companyId: normalizedCompanyId,
+          await this.createImportedFuelRecordGroup({
             vehicleId: vehicle.id,
             currentKm: vehicle.currentKm,
             invoiceKey: invoice.invoiceKey,
@@ -234,12 +248,11 @@ export class FuelRecordsService {
             supplierName: invoice.supplierName,
             plate: invoice.plate,
             odometer: invoice.odometer,
-            lineIndex: item.lineIndex,
-            productCode: item.productCode,
-            quantity: item.quantity,
-            totalPrice: item.totalPrice,
-            detectedFuelType: item.detectedFuelType,
-            fuelDateTime: item.fuelDateTime,
+            issuedAt: invoice.issuedAt,
+            groupFuelType: group.fuelType,
+            totalQuantity: group.totalQuantity,
+            totalPrice: group.totalPrice,
+            sourceItems,
           });
           totalImportados += 1;
         } catch (error) {
@@ -254,9 +267,10 @@ export class FuelRecordsService {
     return {
       totalInvoicesRead: new Set(invoices.map((invoice) => invoice.invoiceKey)).size,
       totalItemsDetected,
+      totalGroups,
       totalImported: totalImportados,
       totalIgnored: totalIgnorados,
-      totalDuplicated: totalDuplicados + Math.max(0, totalItemsDetected - totalImportados - totalIgnorados - totalDuplicados),
+      totalDuplicated: totalDuplicados,
     };
   }
 
@@ -496,8 +510,7 @@ export class FuelRecordsService {
     }
   }
 
-  private async createImportedFuelRecord(input: {
-    companyId: string;
+  private async createImportedFuelRecordGroup(input: {
     vehicleId: string;
     currentKm: number;
     invoiceKey: string;
@@ -505,27 +518,38 @@ export class FuelRecordsService {
     supplierName?: string;
     plate?: string;
     odometer?: number;
-    lineIndex: number;
-    productCode?: string;
-    quantity: number;
+    issuedAt?: string;
+    groupFuelType: string;
+    totalQuantity: number;
     totalPrice: number;
-    detectedFuelType?: string;
-    fuelDateTime?: string;
+    sourceItems: Array<{
+      lineIndex: number;
+      productCode?: string;
+      quantity: number;
+      unitPrice: number;
+      totalPrice: number;
+      fuelDateTime?: string;
+    }>;
   }) {
-    const liters = Number(input.quantity || 0);
+    const liters = Number(input.totalQuantity || 0);
     if (!(liters > 0)) {
-      throw new BadRequestException('Quantidade do item deve ser maior que zero.');
+      throw new BadRequestException(
+        'Quantidade consolidada do grupo deve ser maior que zero.',
+      );
     }
 
-    const fuelDate =
-      (input.fuelDateTime ? new Date(input.fuelDateTime) : null) || new Date();
+    const fuelDate = this.resolveImportedFuelGroupDate(
+      input.issuedAt,
+      input.sourceItems,
+    );
     const km =
       typeof input.odometer === 'number' && input.odometer >= 0
         ? Math.round(input.odometer)
         : input.currentKm;
+    const firstSourceItem = input.sourceItems[0];
     const sourceProductCode = this.normalizeSourceProductCode(
-      input.productCode,
-      input.lineIndex,
+      firstSourceItem?.productCode,
+      firstSourceItem?.lineIndex,
     );
 
     const consumption = await this.calculateConsumption(
@@ -543,9 +567,7 @@ export class FuelRecordsService {
         totalValue: Number(input.totalPrice || 0),
         km,
         station: String(input.supplierName || 'Fornecedor nao informado').trim(),
-        fuelType: this.mapDetectedFuelTypeToRecordFuelType(
-          input.detectedFuelType,
-        ),
+        fuelType: this.mapDetectedFuelTypeToRecordFuelType(input.groupFuelType),
         fuelDate,
         vehicleId: input.vehicleId,
         driverId: null,
@@ -553,10 +575,18 @@ export class FuelRecordsService {
         isAnomaly: consumption.isAnomaly,
         anomalyReason: consumption.anomalyReason,
         sourceInvoiceKey: input.invoiceKey,
-        sourceInvoiceLineIndex: input.lineIndex,
+        sourceInvoiceLineIndex: firstSourceItem?.lineIndex || null,
         sourceProductCode,
         sourcePlate: this.normalizePlate(input.plate),
         sourceFuelDateTime: fuelDate,
+        sourceItems: input.sourceItems.map((item) => ({
+          lineIndex: item.lineIndex,
+          quantity: Number(item.quantity || 0),
+          unitPrice: Number(item.unitPrice || 0),
+          totalPrice: Number(item.totalPrice || 0),
+          productCode: item.productCode || null,
+          fuelDateTime: item.fuelDateTime || null,
+        })) as Prisma.InputJsonValue,
       },
       include: this.includeVehicle,
     });
@@ -565,6 +595,25 @@ export class FuelRecordsService {
       await this.updateVehicleKm(created.vehicleId, created.km);
     }
     return created;
+  }
+
+  private resolveImportedFuelGroupDate(
+    issuedAt: string | undefined,
+    sourceItems: Array<{ fuelDateTime?: string }>,
+  ) {
+    if (issuedAt) {
+      const issuedDate = new Date(issuedAt);
+      if (!Number.isNaN(issuedDate.getTime())) {
+        return issuedDate;
+      }
+    }
+
+    const itemDates = sourceItems
+      .map((item) => (item.fuelDateTime ? new Date(item.fuelDateTime) : null))
+      .filter((item): item is Date => Boolean(item && !Number.isNaN(item.getTime())))
+      .sort((left, right) => left.getTime() - right.getTime());
+
+    return itemDates[0] || new Date();
   }
 
   private isFuelXmlDuplicateConflict(error: unknown) {

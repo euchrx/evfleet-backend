@@ -552,8 +552,11 @@ describe('XmlImportService', () => {
         findFirst: jest
           .fn()
           .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(null)
           .mockResolvedValueOnce({ id: 'duplicated_item' })
-          .mockResolvedValueOnce(null),
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: 'duplicated_group_arla' }),
         findMany: jest.fn(async () => []),
       },
     };
@@ -592,6 +595,15 @@ describe('XmlImportService', () => {
       </det>
       <det nItem="2">
         <prod>
+          <cProd>001-A</cProd>
+          <xProd>Diesel S10 aditivado</xProd>
+          <qCom>60.0000</qCom>
+          <vUnCom>6.2000</vUnCom>
+          <vProd>372.00</vProd>
+        </prod>
+      </det>
+      <det nItem="3">
+        <prod>
           <cProd>002</cProd>
           <xProd>ARLA 32</xProd>
           <qCom>50.0000</qCom>
@@ -599,7 +611,7 @@ describe('XmlImportService', () => {
           <vProd>125.00</vProd>
         </prod>
       </det>
-      <det nItem="3">
+      <det nItem="4">
         <prod>
           <cProd>003</cProd>
           <xProd>Agua mineral</xProd>
@@ -625,8 +637,8 @@ describe('XmlImportService', () => {
 
     expect(preview.summary).toEqual({
       totalInvoices: 1,
-      totalItems: 3,
-      importableItems: 1,
+      totalItems: 4,
+      importableItems: 2,
       duplicateItems: 1,
       otherItems: 1,
     });
@@ -651,15 +663,46 @@ describe('XmlImportService', () => {
       }),
       expect.objectContaining({
         lineIndex: 2,
+        detectedType: 'FUEL',
+        importable: true,
+        duplicate: false,
+        detectedFuelType: 'S10',
+      }),
+      expect.objectContaining({
+        lineIndex: 3,
         detectedType: 'ARLA',
         importable: true,
         duplicate: true,
       }),
       expect.objectContaining({
-        lineIndex: 3,
+        lineIndex: 4,
         detectedType: 'OTHER',
         importable: false,
         duplicate: false,
+      }),
+    ]);
+    expect(preview.invoices[0].consolidated).toEqual([
+      expect.objectContaining({
+        groupKey:
+          '55555555555555555555555555555555555555555555|RHV4H87|FUEL|S10',
+        detectedType: 'FUEL',
+        fuelType: 'S10',
+        totalQuantity: 160,
+        totalPrice: 987,
+        itemsCount: 2,
+        duplicate: false,
+        importable: true,
+      }),
+      expect.objectContaining({
+        groupKey:
+          '55555555555555555555555555555555555555555555|RHV4H87|ARLA|ARLA32',
+        detectedType: 'ARLA',
+        fuelType: 'ARLA32',
+        totalQuantity: 50,
+        totalPrice: 125,
+        itemsCount: 1,
+        duplicate: true,
+        importable: true,
       }),
     ]);
   });

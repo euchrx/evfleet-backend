@@ -67,6 +67,13 @@ type FuelXmlItemDuplicateCheckResult = {
   duplicateReason?: string;
 };
 
+type FuelXmlGroupDuplicateCheckInput = {
+  companyId: string;
+  invoiceKey: string;
+  plate?: string;
+  fuelType?: string;
+};
+
 type FuelXmlPreviewItem = {
   lineIndex: number;
   productCode?: string;
@@ -84,6 +91,17 @@ type FuelXmlPreviewItem = {
   pumpNumber?: string;
 };
 
+type FuelXmlPreviewConsolidatedGroup = {
+  groupKey: string;
+  detectedType: 'FUEL' | 'ARLA';
+  fuelType: string;
+  totalQuantity: number;
+  totalPrice: number;
+  itemsCount: number;
+  duplicate: boolean;
+  importable: boolean;
+};
+
 type FuelXmlPreviewInvoice = {
   fileName: string;
   invoiceKey: string;
@@ -94,6 +112,7 @@ type FuelXmlPreviewInvoice = {
   plate?: string;
   odometer?: number;
   items: FuelXmlPreviewItem[];
+  consolidated: FuelXmlPreviewConsolidatedGroup[];
 };
 
 type ConfirmFuelImportItemInput = {
@@ -225,6 +244,13 @@ export class XmlImportService {
         }),
       );
 
+      const consolidated = await this.buildFuelPreviewConsolidatedGroups({
+        companyId,
+        invoiceKey: parsedInvoice.invoiceKey,
+        plate: parsedInvoice.plate,
+        items: previewItems,
+      });
+
       invoices.push({
         fileName: String(file.originalname || 'importacao.xml').trim() || 'importacao.xml',
         invoiceKey: parsedInvoice.invoiceKey,
@@ -235,6 +261,7 @@ export class XmlImportService {
         plate: parsedInvoice.plate,
         odometer: parsedInvoice.odometer,
         items: previewItems,
+        consolidated,
       });
     }
 
@@ -356,6 +383,113 @@ export class XmlImportService {
     }
 
     return { duplicate: false };
+  }
+
+  async findFuelImportGroupDuplicate(
+    input: FuelXmlGroupDuplicateCheckInput,
+  ): Promise<FuelXmlItemDuplicateCheckResult> {
+    const companyId = String(input.companyId || '').trim();
+    const invoiceKey = String(input.invoiceKey || '').trim();
+    const normalizedPlate = this.normalizePlate(input.plate);
+    const fuelType = this.toText(input.fuelType);
+
+    if (!companyId || !invoiceKey || !normalizedPlate || !fuelType) {
+      return { duplicate: false };
+    }
+
+    const existing = await this.prisma.fuelRecord.findFirst({
+      where: {
+        sourceInvoiceKey: invoiceKey,
+        sourcePlate: normalizedPlate,
+        fuelType: this.mapDetectedFuelTypeToRecordFuelType(fuelType),
+        vehicle: { is: { companyId } },
+      },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return { duplicate: false };
+    }
+
+    return {
+      duplicate: true,
+      duplicateReason:
+        'Grupo ja importado para a mesma nota, placa e tipo de combustivel.',
+    };
+  }
+
+  private async buildFuelPreviewConsolidatedGroups(input: {
+    companyId: string;
+    invoiceKey: string;
+    plate?: string;
+    items: FuelXmlPreviewItem[];
+  }): Promise<FuelXmlPreviewConsolidatedGroup[]> {
+    const groups = new Map<
+      string,
+      {
+        detectedType: 'FUEL' | 'ARLA';
+        fuelType: string;
+        totalQuantity: number;
+        totalPrice: number;
+        itemsCount: number;
+      }
+    >();
+
+    for (const item of input.items) {
+      if (!item.importable) continue;
+      if (item.detectedType === 'OTHER') continue;
+
+      const fuelType =
+        item.detectedType === 'ARLA'
+          ? 'ARLA32'
+          : String(item.detectedFuelType || '').trim().toUpperCase();
+
+      if (!fuelType) continue;
+
+      const groupKey = [
+        input.invoiceKey,
+        this.normalizePlate(input.plate) || 'SEM_PLACA',
+        item.detectedType,
+        fuelType,
+      ].join('|');
+
+      const current = groups.get(groupKey) || {
+        detectedType: item.detectedType,
+        fuelType,
+        totalQuantity: 0,
+        totalPrice: 0,
+        itemsCount: 0,
+      };
+
+      current.totalQuantity += Number(item.quantity || 0);
+      current.totalPrice += Number(item.totalPrice || 0);
+      current.itemsCount += 1;
+      groups.set(groupKey, current);
+    }
+
+    const consolidated: FuelXmlPreviewConsolidatedGroup[] = [];
+
+    for (const [groupKey, group] of groups.entries()) {
+      const duplicateCheck = await this.findFuelImportGroupDuplicate({
+        companyId: input.companyId,
+        invoiceKey: input.invoiceKey,
+        plate: input.plate,
+        fuelType: group.fuelType,
+      });
+
+      consolidated.push({
+        groupKey,
+        detectedType: group.detectedType,
+        fuelType: group.fuelType,
+        totalQuantity: Number(group.totalQuantity.toFixed(2)),
+        totalPrice: Number(group.totalPrice.toFixed(2)),
+        itemsCount: group.itemsCount,
+        duplicate: duplicateCheck.duplicate,
+        importable: true,
+      });
+    }
+
+    return consolidated;
   }
 
   async importZip(input: ImportXmlZipInput) {
@@ -2496,6 +2630,25 @@ export class XmlImportService {
       detectedType: 'OTHER',
       importable: false,
     };
+  }
+
+  private mapDetectedFuelTypeToRecordFuelType(detectedFuelType?: string) {
+    const normalized = String(detectedFuelType || '').trim().toUpperCase();
+
+    switch (normalized) {
+      case 'ETHANOL':
+        return FuelType.ETHANOL;
+      case 'DIESEL':
+      case 'S10':
+      case 'S500':
+        return FuelType.DIESEL;
+      case 'ARLA32':
+        return FuelType.ARLA32;
+      case 'FLEX':
+        return FuelType.FLEX;
+      default:
+        return FuelType.GASOLINE;
+    }
   }
 
   private readXmlBuffer(buffer: Buffer): string {

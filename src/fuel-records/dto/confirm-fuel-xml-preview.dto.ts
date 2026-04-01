@@ -14,9 +14,6 @@ import {
 import { Type } from 'class-transformer';
 
 class ConfirmFuelXmlPreviewItemDto {
-  @IsBoolean()
-  selected: boolean;
-
   @IsNumber()
   @Min(1)
   lineIndex: number;
@@ -75,10 +72,49 @@ class ConfirmFuelXmlPreviewItemDto {
   pumpNumber?: string;
 }
 
+class ConfirmFuelXmlPreviewConsolidatedGroupDto {
+  @IsBoolean()
+  selected: boolean;
+
+  @IsString()
+  @Length(10, 200)
+  groupKey: string;
+
+  @IsIn(['FUEL', 'ARLA'])
+  detectedType: 'FUEL' | 'ARLA';
+
+  @IsString()
+  @Length(1, 40)
+  fuelType: string;
+
+  @IsNumber()
+  @Min(0)
+  totalQuantity: number;
+
+  @IsNumber()
+  @Min(0)
+  totalPrice: number;
+
+  @IsNumber()
+  @Min(1)
+  itemsCount: number;
+
+  @IsBoolean()
+  duplicate: boolean;
+
+  @IsBoolean()
+  importable: boolean;
+}
+
 class ConfirmFuelXmlPreviewInvoiceDto {
   @IsString()
   @Length(20, 80)
   invoiceKey: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 255)
+  fileName?: string;
 
   @IsOptional()
   @IsString()
@@ -110,10 +146,14 @@ class ConfirmFuelXmlPreviewInvoiceDto {
   odometer?: number;
 
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => ConfirmFuelXmlPreviewItemDto)
   items: ConfirmFuelXmlPreviewItemDto[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ConfirmFuelXmlPreviewConsolidatedGroupDto)
+  consolidated: ConfirmFuelXmlPreviewConsolidatedGroupDto[];
 }
 
 export class ConfirmFuelXmlPreviewDto {

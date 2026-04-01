@@ -279,6 +279,7 @@ model FuelRecord {
   sourceProductCode String?
   sourcePlate String?
   sourceFuelDateTime DateTime?
+  sourceItems Json?
 
   vehicleId String?
   vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
@@ -290,7 +291,8 @@ model FuelRecord {
   @@index([isAnomaly])
   @@index([invoiceNumber])
   @@index([sourceInvoiceKey, sourceInvoiceLineIndex])
-  @@unique([sourceInvoiceKey, sourceInvoiceLineIndex, sourceProductCode])
+  @@index([sourceInvoiceKey, sourcePlate, fuelType])
+  @@unique([sourceInvoiceKey, sourcePlate, fuelType])
 }
 
 model VehicleChangeLog {

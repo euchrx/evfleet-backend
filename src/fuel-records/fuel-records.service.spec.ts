@@ -33,6 +33,7 @@ describe('FuelRecordsService', () => {
     const xmlImportService = {
       previewFuelXmlFiles: jest.fn(),
       findFuelImportDuplicate: jest.fn(async () => ({ duplicate: false })),
+      findFuelImportGroupDuplicate: jest.fn(async () => ({ duplicate: false })),
     };
 
     return {
@@ -46,7 +47,7 @@ describe('FuelRecordsService', () => {
     jest.clearAllMocks();
   });
 
-  it('confirma a importacao de itens selecionados e retorna resumo', async () => {
+  it('confirma a importacao de grupos consolidados e retorna resumo', async () => {
     const { service, prisma } = createService();
 
     const result = await service.confirmXmlImport('company_1', {
@@ -61,7 +62,6 @@ describe('FuelRecordsService', () => {
           odometer: 123456,
           items: [
             {
-              selected: true,
               lineIndex: 1,
               productCode: 'DIESEL-S10',
               productName: 'Diesel S10',
@@ -75,8 +75,20 @@ describe('FuelRecordsService', () => {
               fuelDateTime: '2026-04-01T10:15:00.000Z',
             },
             {
-              selected: false,
               lineIndex: 2,
+              productCode: 'DIESEL-S10-2',
+              productName: 'Diesel S10 aditivo',
+              quantity: 60,
+              unitPrice: 6.5,
+              totalPrice: 390,
+              detectedType: 'FUEL',
+              importable: true,
+              duplicate: false,
+              detectedFuelType: 'S10',
+              fuelDateTime: '2026-04-01T10:10:00.000Z',
+            },
+            {
+              lineIndex: 3,
               productCode: 'OUTRO',
               productName: 'Agua Mineral',
               quantity: 1,
@@ -87,6 +99,20 @@ describe('FuelRecordsService', () => {
               duplicate: false,
             },
           ],
+          consolidated: [
+            {
+              selected: true,
+              groupKey:
+                '11111111111111111111111111111111111111111111|RHV4H87|FUEL|S10',
+              detectedType: 'FUEL',
+              fuelType: 'S10',
+              totalQuantity: 160,
+              totalPrice: 1005,
+              itemsCount: 2,
+              duplicate: false,
+              importable: true,
+            },
+          ],
         },
       ],
     });
@@ -95,8 +121,8 @@ describe('FuelRecordsService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           invoiceNumber: '123',
-          liters: 100,
-          totalValue: 615,
+          liters: 160,
+          totalValue: 1005,
           km: 123456,
           station: 'Posto Teste',
           fuelType: FuelType.DIESEL,
@@ -104,16 +130,28 @@ describe('FuelRecordsService', () => {
             '11111111111111111111111111111111111111111111',
           sourceInvoiceLineIndex: 1,
           sourceProductCode: 'DIESEL-S10',
+          sourceItems: expect.arrayContaining([
+            expect.objectContaining({
+              lineIndex: 1,
+              quantity: 100,
+              unitPrice: 6.15,
+            }),
+            expect.objectContaining({
+              lineIndex: 2,
+              quantity: 60,
+              unitPrice: 6.5,
+            }),
+          ]),
         }),
       }),
     );
     expect(result).toEqual({
       totalInvoicesRead: 1,
-      totalItemsDetected: 2,
+      totalItemsDetected: 3,
+      totalGroups: 1,
       totalImported: 1,
-      totalIgnored: 1,
+      totalIgnored: 0,
       totalDuplicated: 0,
     });
   });
 });
-
