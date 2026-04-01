@@ -18,6 +18,7 @@ describe('CompanyDeletionService', () => {
     });
 
   const createTransactionClient = (order: string[]) => ({
+    $queryRaw: jest.fn().mockResolvedValue([{ locked: true }]),
     branch: {
       findMany: jest.fn().mockResolvedValue([{ id: 'branch-1' }]),
       deleteMany: createDeleteManyMock('branches', 1, order),
@@ -95,6 +96,11 @@ describe('CompanyDeletionService', () => {
       create: createDeleteManyMock('auditLog', 1, order),
     },
     company: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'company-1',
+        name: 'EvFleet',
+        slug: 'evfleet',
+      }),
       delete: createDeleteMock('company', order),
     },
   });
@@ -108,10 +114,13 @@ describe('CompanyDeletionService', () => {
       }),
     };
     const companyBackupService = {
-      createBackup: jest.fn().mockResolvedValue({
-        fileName: 'company-evfleet-2026-04-01.json',
-        filePath: 'storage/backups/companies/company-evfleet-2026-04-01.json',
-        generatedAt: '2026-04-01T10:00:00.000Z',
+      createBackupWithClient: jest.fn().mockImplementation(async () => {
+        deleteOrder.push('backup');
+        return {
+          fileName: 'company-evfleet-2026-04-01.json',
+          filePath: 'storage/backups/companies/company-evfleet-2026-04-01.json',
+          generatedAt: '2026-04-01T10:00:00.000Z',
+        };
       }),
     };
     const auditService = {
@@ -141,21 +150,19 @@ describe('CompanyDeletionService', () => {
     jest.clearAllMocks();
   });
 
-  it('gera backup antes de excluir', async () => {
-    const { service, prisma, companyBackupService } = createService();
+  it('gera backup no mesmo fluxo transacional antes de excluir', async () => {
+    const { service, companyBackupService } = createService();
 
     await service.deleteWithBackup(
       { id: 'company-1', name: 'EvFleet', slug: 'evfleet' },
       { userId: 'admin-1' },
     );
 
-    expect(companyBackupService.createBackup).toHaveBeenCalledWith(
+    expect(companyBackupService.createBackupWithClient).toHaveBeenCalledWith(
+      expect.any(Object),
       'company-1',
       'admin-1',
     );
-    expect(
-      companyBackupService.createBackup.mock.invocationCallOrder[0],
-    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0]);
   });
 
   it('exclui em ordem segura e retorna resumo com contagem', async () => {
@@ -167,6 +174,7 @@ describe('CompanyDeletionService', () => {
     );
 
     expect(deleteOrder).toEqual([
+      'backup',
       'vehicleProfilePhotos',
       'vehicleChangeLogs',
       'vehicleDocuments',
@@ -284,11 +292,62 @@ describe('CompanyDeletionService', () => {
       },
     });
 
-    expect(companyBackupService.createBackup).toHaveBeenCalled();
+    expect(companyBackupService.createBackupWithClient).not.toHaveBeenCalled();
     expect(auditService.createEntry).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({
           outcome: 'FAILED',
+        }),
+        swallowErrors: true,
+      }),
+    );
+  });
+
+  it('bloqueia exclusao concorrente da mesma empresa', async () => {
+    const { service, companyBackupService, prisma } = createService();
+    prisma.$transaction.mockImplementation(async (callback: any) => {
+      const tx = createTransactionClient([]);
+      tx.$queryRaw.mockResolvedValue([{ locked: false }]);
+      return callback(tx);
+    });
+
+    await expect(
+      service.deleteWithBackup(
+        { id: 'company-1', name: 'EvFleet', slug: 'evfleet' },
+        { userId: 'admin-1' },
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        success: false,
+        errorCode: 'COMPANY_DELETE_IN_PROGRESS',
+      },
+    });
+
+    expect(companyBackupService.createBackupWithClient).not.toHaveBeenCalled();
+  });
+
+  it('retorna erro claro quando o backup falha e registra tentativa', async () => {
+    const { service, companyBackupService, auditService } = createService();
+    companyBackupService.createBackupWithClient.mockRejectedValue(
+      new Error('Falha de escrita em disco.'),
+    );
+
+    await expect(
+      service.deleteWithBackup(
+        { id: 'company-1', name: 'EvFleet', slug: 'evfleet' },
+        { userId: 'admin-1' },
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        success: false,
+        errorCode: 'COMPANY_BACKUP_FAILED',
+      },
+    });
+
+    expect(auditService.createEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          outcome: 'BACKUP_FAILED',
         }),
         swallowErrors: true,
       }),

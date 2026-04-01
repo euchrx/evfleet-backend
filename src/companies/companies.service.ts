@@ -280,11 +280,28 @@ export class CompaniesService {
     dto: DeleteCompanyDto,
     authenticatedUser: any,
   ) {
-    const validated = await this.validateDeleteAuthorization(
-      companyId,
-      dto,
-      authenticatedUser,
-    );
+    let validated: DeleteAuthorizationResponse;
+
+    try {
+      validated = await this.validateDeleteAuthorization(
+        companyId,
+        dto,
+        authenticatedUser,
+      );
+    } catch (error) {
+      if (this.isCompanyNotFoundError(error)) {
+        const previousResult =
+          await this.companyDeletionService.findCompletedDeletionResult(
+            companyId,
+          );
+
+        if (previousResult) {
+          return previousResult;
+        }
+      }
+
+      throw error;
+    }
 
     return this.companyDeletionService.deleteWithBackup(
       validated.data.company,
@@ -379,5 +396,21 @@ export class CompaniesService {
       errorCode,
       message,
     };
+  }
+
+  private isCompanyNotFoundError(error: unknown) {
+    if (!(error instanceof NotFoundException)) {
+      return false;
+    }
+
+    const response = error.getResponse();
+    if (!response || typeof response !== 'object') {
+      return false;
+    }
+
+    return (
+      'errorCode' in response &&
+      (response as { errorCode?: string }).errorCode === 'COMPANY_NOT_FOUND'
+    );
   }
 }

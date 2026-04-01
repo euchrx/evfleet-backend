@@ -24,6 +24,7 @@ describe('CompaniesService', () => {
 
   const companyDeletionServiceMock = {
     deleteWithBackup: jest.fn(),
+    findCompletedDeletionResult: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -201,6 +202,67 @@ describe('CompaniesService', () => {
     expect(result).toMatchObject({
       success: true,
       message: 'Empresa excluída com sucesso.',
+    });
+  });
+
+  it('retorna resultado anterior quando a exclusao ja foi concluida antes', async () => {
+    prismaMock.company.findUnique.mockResolvedValue(null);
+    companyDeletionServiceMock.findCompletedDeletionResult.mockResolvedValue({
+      success: true,
+      message: 'A empresa já havia sido excluída anteriormente.',
+      data: {
+        company: {
+          id: 'company-1',
+          name: 'EvFleet',
+        },
+        backup: {
+          fileName: 'company-evfleet.json',
+          filePath: 'storage/backups/companies/company-evfleet.json',
+          generatedAt: '2026-04-01T12:00:00.000Z',
+        },
+        deleted: {
+          company: 1,
+          branches: 1,
+          users: 3,
+          subscriptions: 3,
+          payments: 0,
+          webhookEvents: 0,
+          vehicles: 0,
+          vehicleProfilePhotos: 0,
+          vehicleChangeLogs: 0,
+          drivers: 0,
+          maintenanceRecords: 0,
+          maintenancePlans: 0,
+          debts: 0,
+          fuelRecords: 0,
+          trips: 0,
+          vehicleDocuments: 0,
+          tires: 0,
+          tireReadings: 0,
+          xmlImportBatches: 0,
+          xmlInvoices: 0,
+          xmlInvoiceItems: 0,
+          retailProductImports: 0,
+          retailProductImportItems: 0,
+        },
+      },
+    });
+
+    const result = await service.deleteWithBackup(
+      'company-1',
+      {
+        password: 'senha-correta',
+        confirmationText: 'EXCLUIR EMPRESA',
+      },
+      { userId: 'admin-1' },
+    );
+
+    expect(companyDeletionServiceMock.findCompletedDeletionResult).toHaveBeenCalledWith(
+      'company-1',
+    );
+    expect(result).toMatchObject({
+      success: true,
+      message: 'A empresa já havia sido excluída anteriormente.',
     });
   });
 });

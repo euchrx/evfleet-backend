@@ -2,8 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
-import { PrismaService } from '../../prisma/prisma.service';
+import { Prisma, PrismaService } from '../../prisma/prisma.service';
 import { CompanyDeletionBackupResult } from '../company-deletion.types';
+
+type BackupClient = Prisma.TransactionClient | PrismaService;
 
 type CompanyBackupPayload = {
   metadata: {
@@ -48,8 +50,38 @@ export class CompanyBackupService {
     companyId: string,
     actorUserId: string,
   ): Promise<CompanyDeletionBackupResult> {
+    return this.createBackupWithClient(this.prisma, companyId, actorUserId);
+  }
+
+  async createBackupWithClient(
+    client: BackupClient,
+    companyId: string,
+    actorUserId: string,
+  ): Promise<CompanyDeletionBackupResult> {
     const generatedAt = new Date().toISOString();
-    const company = await this.prisma.company.findUnique({
+    const payload = await this.buildPayload(client, companyId, actorUserId, generatedAt);
+    const company = payload.company as { id: string; slug?: string | null };
+    const backupDir = join(process.cwd(), 'storage', 'backups', 'companies');
+    const fileName = this.buildFileName(company.slug, company.id, generatedAt);
+    const backupPath = join(backupDir, fileName);
+    const serializedPayload = JSON.stringify(payload, this.jsonReplacer, 2);
+
+    return this.persistBackupToLocalDisk(
+      backupDir,
+      backupPath,
+      fileName,
+      serializedPayload,
+      generatedAt,
+    );
+  }
+
+  private async buildPayload(
+    client: BackupClient,
+    companyId: string,
+    actorUserId: string,
+    generatedAt: string,
+  ): Promise<CompanyBackupPayload> {
+    const company = await client.company.findUnique({
       where: { id: companyId },
     });
 
@@ -59,60 +91,60 @@ export class CompanyBackupService {
       );
     }
 
-    const branches = await this.prisma.branch.findMany({ where: { companyId } });
+    const branches = await client.branch.findMany({ where: { companyId } });
     const branchIds = branches.map((item) => item.id);
 
     const vehicles = branchIds.length
-      ? await this.prisma.vehicle.findMany({
+      ? await client.vehicle.findMany({
           where: { branchId: { in: branchIds } },
         })
       : [];
     const vehicleIds = vehicles.map((item) => item.id);
 
     const drivers = vehicleIds.length
-      ? await this.prisma.driver.findMany({
+      ? await client.driver.findMany({
           where: { vehicleId: { in: vehicleIds } },
         })
       : [];
 
     const maintenanceRecords = vehicleIds.length
-      ? await this.prisma.maintenanceRecord.findMany({
+      ? await client.maintenanceRecord.findMany({
           where: { vehicleId: { in: vehicleIds } },
         })
       : [];
 
     const maintenancePlans = vehicleIds.length
-      ? await this.prisma.maintenancePlan.findMany({
+      ? await client.maintenancePlan.findMany({
           where: { vehicleId: { in: vehicleIds } },
         })
       : [];
 
     const debts = vehicleIds.length
-      ? await this.prisma.debt.findMany({
+      ? await client.debt.findMany({
           where: { vehicleId: { in: vehicleIds } },
         })
       : [];
 
     const fuelRecords = vehicleIds.length
-      ? await this.prisma.fuelRecord.findMany({
+      ? await client.fuelRecord.findMany({
           where: { vehicleId: { in: vehicleIds } },
         })
       : [];
 
     const trips = vehicleIds.length
-      ? await this.prisma.trip.findMany({
+      ? await client.trip.findMany({
           where: { vehicleId: { in: vehicleIds } },
         })
       : [];
 
     const vehicleDocuments = vehicleIds.length
-      ? await this.prisma.vehicleDocument.findMany({
+      ? await client.vehicleDocument.findMany({
           where: { vehicleId: { in: vehicleIds } },
         })
       : [];
 
     const tires = vehicleIds.length
-      ? await this.prisma.tire.findMany({
+      ? await client.tire.findMany({
           where: { vehicleId: { in: vehicleIds } },
         })
       : [];
@@ -120,7 +152,7 @@ export class CompanyBackupService {
 
     const tireReadings =
       tireIds.length || vehicleIds.length
-        ? await this.prisma.tireReading.findMany({
+        ? await client.tireReading.findMany({
             where: {
               OR: [
                 ...(tireIds.length ? [{ tireId: { in: tireIds } }] : []),
@@ -131,25 +163,25 @@ export class CompanyBackupService {
         : [];
 
     const vehicleChangeLogs = vehicleIds.length
-      ? await this.prisma.vehicleChangeLog.findMany({
+      ? await client.vehicleChangeLog.findMany({
           where: { vehicleId: { in: vehicleIds } },
         })
       : [];
 
     const vehicleProfilePhotos = vehicleIds.length
-      ? await this.prisma.vehicleProfilePhoto.findMany({
+      ? await client.vehicleProfilePhoto.findMany({
           where: { vehicleId: { in: vehicleIds } },
         })
       : [];
 
-    const users = await this.prisma.user.findMany({ where: { companyId } });
-    const subscriptions = await this.prisma.subscription.findMany({
+    const users = await client.user.findMany({ where: { companyId } });
+    const subscriptions = await client.subscription.findMany({
       where: { companyId },
     });
     const subscriptionIds = subscriptions.map((item) => item.id);
 
-    const payments = await this.prisma.payment.findMany({ where: { companyId } });
-    const webhookEvents = await this.prisma.webhookEvent.findMany({
+    const payments = await client.payment.findMany({ where: { companyId } });
+    const webhookEvents = await client.webhookEvent.findMany({
       where: {
         OR: [
           { companyId },
@@ -160,34 +192,34 @@ export class CompanyBackupService {
       },
     });
 
-    const xmlImportBatches = await this.prisma.xmlImportBatch.findMany({
+    const xmlImportBatches = await client.xmlImportBatch.findMany({
       where: { companyId },
     });
     const batchIds = xmlImportBatches.map((item) => item.id);
 
-    const xmlInvoices = await this.prisma.xmlInvoice.findMany({
+    const xmlInvoices = await client.xmlInvoice.findMany({
       where: { companyId },
     });
     const invoiceIds = xmlInvoices.map((item) => item.id);
 
     const xmlInvoiceItems = invoiceIds.length
-      ? await this.prisma.xmlInvoiceItem.findMany({
+      ? await client.xmlInvoiceItem.findMany({
           where: { invoiceId: { in: invoiceIds } },
         })
       : [];
 
-    const retailProductImports = await this.prisma.retailProductImport.findMany({
+    const retailProductImports = await client.retailProductImport.findMany({
       where: { companyId },
     });
     const retailImportIds = retailProductImports.map((item) => item.id);
 
     const retailProductImportItems = retailImportIds.length
-      ? await this.prisma.retailProductImportItem.findMany({
+      ? await client.retailProductImportItem.findMany({
           where: { retailProductImportId: { in: retailImportIds } },
         })
       : [];
 
-    const payload: CompanyBackupPayload = {
+    return {
       metadata: {
         generatedAt,
         actorUserId,
@@ -229,13 +261,6 @@ export class CompanyBackupService {
         retailImportIds,
       },
     };
-
-    const backupDir = join(process.cwd(), 'storage', 'backups', 'companies');
-    const fileName = this.buildFileName(company.slug, company.id, generatedAt);
-    const backupPath = join(backupDir, fileName);
-    const serializedPayload = JSON.stringify(payload, this.jsonReplacer, 2);
-
-    return this.persistBackupToLocalDisk(backupDir, backupPath, fileName, serializedPayload, generatedAt);
   }
 
   private buildFileName(
@@ -303,6 +328,7 @@ export class CompanyBackupService {
     if (error instanceof Error && error.message) {
       return error.message;
     }
+
     return 'erro desconhecido';
   }
 }

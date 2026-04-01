@@ -17,6 +17,14 @@ import {
   DeleteWithBackupResponse,
 } from './company-deletion.types';
 
+type CompletedDeletionMetadata = {
+  companyName?: string;
+  backupFileName?: string;
+  backupFilePath?: string;
+  deletedSummary?: CompanyDeletionSummary;
+  outcome?: string;
+};
+
 @Injectable()
 export class CompanyDeletionService {
   private static readonly AUDIT_ACTION = 'DELETE_COMPANY_WITH_BACKUP';
@@ -43,101 +51,114 @@ export class CompanyDeletionService {
       );
     }
 
-    let backup: CompanyDeletionBackupResult;
-
     try {
-      backup = await this.companyBackupService.createBackup(
-        company.id,
-        actorUserId,
+      return await this.prisma.$transaction(
+        async (tx) => {
+          const lockAcquired = await this.tryAcquireCompanyDeletionLock(
+            tx,
+            company.id,
+          );
+          if (!lockAcquired) {
+            throw this.buildConflictException(
+              'COMPANY_DELETE_IN_PROGRESS',
+              'Já existe uma exclusão definitiva em andamento para esta empresa. Aguarde a conclusão e tente novamente.',
+            );
+          }
+
+          const existingCompany = await tx.company.findUnique({
+            where: { id: company.id },
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          });
+
+          if (!existingCompany) {
+            const previousResult = await this.findCompletedDeletionResult(
+              company.id,
+            );
+
+            if (previousResult) {
+              return previousResult;
+            }
+
+            throw new NotFoundException(
+              this.buildErrorBody(
+                'COMPANY_NOT_FOUND',
+                'A empresa informada não foi encontrada para exclusão.',
+              ),
+            );
+          }
+
+          let backup: CompanyDeletionBackupResult;
+
+          try {
+            backup = await this.companyBackupService.createBackupWithClient(
+              tx,
+              existingCompany.id,
+              actorUserId,
+            );
+          } catch (error) {
+            throw this.buildInternalServerErrorException(
+              'COMPANY_BACKUP_FAILED',
+              `Não foi possível gerar o backup da empresa antes da exclusão. ${this.getErrorMessage(error)}`,
+            );
+          }
+
+          const deletedSummary = await this.performDeletion(
+            tx,
+            existingCompany.id,
+          );
+
+          await this.auditService.createEntry({
+            action: CompanyDeletionService.AUDIT_ACTION,
+            entity: 'Company',
+            entityId: existingCompany.id,
+            performedByUserId: actorUserId,
+            metadata: {
+              companyName: existingCompany.name,
+              companySlug: existingCompany.slug || null,
+              backupFileName: backup.fileName,
+              backupFilePath: backup.filePath,
+              deletedSummary,
+              executedAt: new Date().toISOString(),
+              outcome: 'SUCCESS',
+            },
+            client: tx,
+          });
+
+          return {
+            success: true,
+            message: 'Empresa excluída com sucesso.',
+            data: {
+              company: {
+                id: existingCompany.id,
+                name: existingCompany.name,
+              },
+              backup,
+              deleted: deletedSummary,
+            },
+          };
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        },
       );
     } catch (error) {
-      await this.auditService.createEntry({
-        action: CompanyDeletionService.AUDIT_ACTION,
-        entity: 'Company',
-        entityId: company.id,
-        performedByUserId: actorUserId,
-        metadata: {
-          companyName: company.name,
-          companySlug: company.slug || null,
-          backupFileName: null,
-          backupFilePath: null,
-          deletedSummary: null,
-          executedAt: new Date().toISOString(),
-          outcome: 'BACKUP_FAILED',
-          errorMessage: this.getErrorMessage(error),
-        },
-        swallowErrors: true,
-      });
-
-      throw this.buildInternalServerErrorException(
-        'COMPANY_BACKUP_FAILED',
-        `Não foi possível gerar o backup da empresa antes da exclusão. ${this.getErrorMessage(error)}`,
-      );
-    }
-
-    try {
-      const deleted = await this.prisma.$transaction(async (tx) => {
-        const deletedSummary = await this.performDeletion(tx, company.id);
-
-        await this.auditService.createEntry({
-          action: CompanyDeletionService.AUDIT_ACTION,
-          entity: 'Company',
-          entityId: company.id,
-          performedByUserId: actorUserId,
-          metadata: {
-            companyName: company.name,
-            companySlug: company.slug || null,
-            backupFileName: backup.fileName,
-            backupFilePath: backup.filePath,
-            deletedSummary,
-            executedAt: new Date().toISOString(),
-            outcome: 'SUCCESS',
-          },
-          client: tx,
-        });
-
-        return deletedSummary;
-      });
-
-      return {
-        success: true,
-        message: 'Empresa excluída com sucesso.',
-        data: {
-          company: {
-            id: company.id,
-            name: company.name,
-          },
-          backup,
-          deleted,
-        },
-      };
-    } catch (error) {
-      await this.auditService.createEntry({
-        action: CompanyDeletionService.AUDIT_ACTION,
-        entity: 'Company',
-        entityId: company.id,
-        performedByUserId: actorUserId,
-        metadata: {
-          companyName: company.name,
-          companySlug: company.slug || null,
-          backupFileName: backup.fileName,
-          backupFilePath: backup.filePath,
-          deletedSummary: null,
-          executedAt: new Date().toISOString(),
-          outcome: 'FAILED',
-          errorMessage: this.getErrorMessage(error),
-        },
-        swallowErrors: true,
-      });
+      await this.auditDeletionFailure(company, actorUserId, error);
 
       this.logger.error(
         `Falha ao excluir empresa ${company.id}: ${this.getErrorMessage(error)}`,
       );
 
+      const errorCode = this.getErrorCode(error);
+
       if (
         error instanceof BadRequestException ||
         error instanceof ConflictException ||
-        error instanceof NotFoundException
+        error instanceof NotFoundException ||
+        errorCode === 'COMPANY_BACKUP_FAILED'
       ) {
         throw error;
       }
@@ -154,6 +175,135 @@ export class CompanyDeletionService {
         `A exclusão definitiva da empresa falhou após a geração do backup. ${this.getErrorMessage(error)}`,
       );
     }
+  }
+
+  async findCompletedDeletionResult(
+    companyId: string,
+  ): Promise<DeleteWithBackupResponse | null> {
+    const entries = await this.prisma.auditLog.findMany({
+      where: {
+        action: CompanyDeletionService.AUDIT_ACTION,
+        entity: 'Company',
+        entityId: companyId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 10,
+    });
+
+    for (const entry of entries) {
+      const metadata = this.parseCompletedDeletionMetadata(entry.metadata);
+      if (metadata?.outcome !== 'SUCCESS') {
+        continue;
+      }
+
+      if (
+        !metadata.companyName ||
+        !metadata.backupFileName ||
+        !metadata.backupFilePath
+      ) {
+        continue;
+      }
+
+      return {
+        success: true,
+        message: 'A empresa já havia sido excluída anteriormente.',
+        data: {
+          company: {
+            id: companyId,
+            name: metadata.companyName,
+          },
+          backup: {
+            fileName: metadata.backupFileName,
+            filePath: metadata.backupFilePath,
+            generatedAt: entry.createdAt.toISOString(),
+          },
+          deleted: metadata.deletedSummary || this.emptyDeletionSummary(),
+        },
+      };
+    }
+
+    return null;
+  }
+
+  private async tryAcquireCompanyDeletionLock(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+  ) {
+    const rows = await tx.$queryRaw<Array<{ locked: boolean }>>`
+      SELECT pg_try_advisory_xact_lock(
+        hashtext('company-delete-with-backup'),
+        hashtext(${companyId})
+      ) AS locked
+    `;
+
+    return Boolean(rows?.[0]?.locked);
+  }
+
+  private async auditDeletionFailure(
+    company: { id: string; name: string; slug?: string | null },
+    actorUserId: string,
+    error: unknown,
+  ) {
+    const errorCode = this.getErrorCode(error);
+
+    await this.auditService.createEntry({
+      action: CompanyDeletionService.AUDIT_ACTION,
+      entity: 'Company',
+      entityId: company.id,
+      performedByUserId: actorUserId,
+      metadata: {
+        companyName: company.name,
+        companySlug: company.slug || null,
+        backupFileName: null,
+        backupFilePath: null,
+        deletedSummary: null,
+        executedAt: new Date().toISOString(),
+        outcome:
+          errorCode === 'COMPANY_BACKUP_FAILED' ? 'BACKUP_FAILED' : 'FAILED',
+        errorMessage: this.getErrorMessage(error),
+      },
+      swallowErrors: true,
+    });
+  }
+
+  private parseCompletedDeletionMetadata(
+    metadata: Prisma.JsonValue | null | undefined,
+  ): CompletedDeletionMetadata | null {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return null;
+    }
+
+    return metadata as unknown as CompletedDeletionMetadata;
+  }
+
+  private emptyDeletionSummary(): CompanyDeletionSummary {
+    return {
+      company: 0,
+      branches: 0,
+      users: 0,
+      subscriptions: 0,
+      payments: 0,
+      webhookEvents: 0,
+      vehicles: 0,
+      vehicleProfilePhotos: 0,
+      vehicleChangeLogs: 0,
+      drivers: 0,
+      maintenanceRecords: 0,
+      maintenancePlans: 0,
+      debts: 0,
+      fuelRecords: 0,
+      trips: 0,
+      vehicleDocuments: 0,
+      tires: 0,
+      tireReadings: 0,
+      xmlImportBatches: 0,
+      xmlInvoices: 0,
+      xmlInvoiceItems: 0,
+      retailProductImports: 0,
+      retailProductImportItems: 0,
+    };
   }
 
   private async performDeletion(
@@ -208,31 +358,7 @@ export class CompanyDeletionService {
     });
     const retailImportIds = retailImports.map((item) => item.id);
 
-    const summary: CompanyDeletionSummary = {
-      company: 0,
-      branches: 0,
-      users: 0,
-      subscriptions: 0,
-      payments: 0,
-      webhookEvents: 0,
-      vehicles: 0,
-      vehicleProfilePhotos: 0,
-      vehicleChangeLogs: 0,
-      drivers: 0,
-      maintenanceRecords: 0,
-      maintenancePlans: 0,
-      debts: 0,
-      fuelRecords: 0,
-      trips: 0,
-      vehicleDocuments: 0,
-      tires: 0,
-      tireReadings: 0,
-      xmlImportBatches: 0,
-      xmlInvoices: 0,
-      xmlInvoiceItems: 0,
-      retailProductImports: 0,
-      retailProductImportItems: 0,
-    };
+    const summary: CompanyDeletionSummary = this.emptyDeletionSummary();
 
     if (vehicleIds.length) {
       summary.vehicleProfilePhotos = (
@@ -294,7 +420,9 @@ export class CompanyDeletionService {
             where: {
               OR: [
                 ...(tireIds.length ? [{ tireId: { in: tireIds } }] : []),
-                ...(vehicleIds.length ? [{ vehicleId: { in: vehicleIds } }] : []),
+                ...(vehicleIds.length
+                  ? [{ vehicleId: { in: vehicleIds } }]
+                  : []),
               ],
             },
           })
@@ -404,6 +532,11 @@ export class CompanyDeletionService {
   }
 
   private getErrorMessage(error: unknown) {
+    const responseMessage = this.getResponseMessage(error);
+    if (responseMessage) {
+      return responseMessage;
+    }
+
     if (error instanceof Error && error.message) {
       return error.message;
     }
@@ -413,6 +546,53 @@ export class CompanyDeletionService {
     }
 
     return 'Erro interno não identificado.';
+  }
+
+  private getErrorCode(error: unknown) {
+    if (
+      error instanceof BadRequestException ||
+      error instanceof ConflictException ||
+      error instanceof InternalServerErrorException ||
+      error instanceof NotFoundException ||
+      error instanceof UnauthorizedException
+    ) {
+      const response = error.getResponse();
+      if (response && typeof response === 'object' && 'errorCode' in response) {
+        return String(
+          (response as { errorCode?: string }).errorCode || '',
+        ).trim();
+      }
+    }
+
+    if (error && typeof error === 'object' && 'errorCode' in error) {
+      return String((error as { errorCode?: string }).errorCode || '').trim();
+    }
+
+    return '';
+  }
+
+  private getResponseMessage(error: unknown) {
+    if (
+      error instanceof BadRequestException ||
+      error instanceof ConflictException ||
+      error instanceof InternalServerErrorException ||
+      error instanceof NotFoundException ||
+      error instanceof UnauthorizedException
+    ) {
+      const response = error.getResponse();
+      if (response && typeof response === 'object' && 'message' in response) {
+        const message = (response as { message?: string | string[] }).message;
+        if (Array.isArray(message)) {
+          return message.join(', ');
+        }
+
+        if (typeof message === 'string' && message.trim()) {
+          return message.trim();
+        }
+      }
+    }
+
+    return '';
   }
 
   private isRelationalIntegrityError(error: unknown) {
