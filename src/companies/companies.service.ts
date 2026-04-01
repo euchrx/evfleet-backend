@@ -2,15 +2,29 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma, SubscriptionStatus } from '@prisma/client';
+import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CompanyDeletionService } from './company-deletion.service';
+import {
+  CompanyDeletionErrorBody,
+  DeleteAuthorizationResponse,
+} from './company-deletion.types';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { DeleteCompanyDto } from './dto/delete-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 
 @Injectable()
 export class CompaniesService {
-  constructor(private readonly prisma: PrismaService) {}
+  private static readonly DELETE_CONFIRMATION_TEXT = 'EXCLUIR EMPRESA';
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authService: AuthService,
+    private readonly companyDeletionService: CompanyDeletionService,
+  ) {}
 
   private readonly TRIAL_DAYS = 15;
 
@@ -213,6 +227,100 @@ export class CompaniesService {
     }
   }
 
+  async validateDeleteAuthorization(
+    companyId: string,
+    dto: DeleteCompanyDto,
+    authenticatedUser: any,
+  ): Promise<DeleteAuthorizationResponse> {
+    const authenticatedUserId = String(
+      authenticatedUser?.userId || authenticatedUser?.id || '',
+    ).trim();
+    if (!authenticatedUserId) {
+      throw this.buildUnauthorizedException(
+        'COMPANY_DELETE_AUTHENTICATED_USER_INVALID',
+        'Não foi possível validar o usuário autenticado para esta ação.',
+      );
+    }
+
+    const company = await this.findCompanyForDeletion(companyId);
+    this.validateConfirmationText(dto.confirmationText);
+
+    try {
+      await this.authService.reauthenticateAdmin(
+        authenticatedUserId,
+        dto.password,
+      );
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw this.buildUnauthorizedException(
+          'COMPANY_DELETE_INVALID_PASSWORD',
+          'A senha informada está incorreta. Confirme a senha atual do administrador.',
+        );
+      }
+
+      throw error;
+    }
+
+    return {
+      success: true,
+      message: 'Reautenticação confirmada para exclusão definitiva da empresa.',
+      data: {
+        company: {
+          id: company.id,
+          name: company.name,
+          slug: company.slug,
+        },
+        confirmationText: dto.confirmationText,
+      },
+    };
+  }
+
+  async deleteWithBackup(
+    companyId: string,
+    dto: DeleteCompanyDto,
+    authenticatedUser: any,
+  ) {
+    const validated = await this.validateDeleteAuthorization(
+      companyId,
+      dto,
+      authenticatedUser,
+    );
+
+    return this.companyDeletionService.deleteWithBackup(
+      validated.data.company,
+      authenticatedUser,
+    );
+  }
+
+  private async findCompanyForDeletion(id: string) {
+    const company = await this.prisma.company.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+      },
+    });
+
+    if (!company) {
+      throw this.buildNotFoundException(
+        'COMPANY_NOT_FOUND',
+        'A empresa informada não foi encontrada para exclusão.',
+      );
+    }
+
+    return company;
+  }
+
+  private validateConfirmationText(confirmationText: string) {
+    if (confirmationText !== CompaniesService.DELETE_CONFIRMATION_TEXT) {
+      throw this.buildBadRequestException(
+        'COMPANY_DELETE_CONFIRMATION_TEXT_INVALID',
+        `Texto de confirmação inválido. Digite exatamente: ${CompaniesService.DELETE_CONFIRMATION_TEXT}.`,
+      );
+    }
+  }
+
   private async getCompanyDependencySummary(companyId: string) {
     const [branches, users, subscriptions, payments, webhookEvents] =
       await Promise.all([
@@ -248,5 +356,28 @@ export class CompaniesService {
     const result = new Date(date);
     result.setDate(result.getDate() + days);
     return result;
+  }
+
+  private buildBadRequestException(errorCode: string, message: string) {
+    return new BadRequestException(this.buildErrorBody(errorCode, message));
+  }
+
+  private buildUnauthorizedException(errorCode: string, message: string) {
+    return new UnauthorizedException(this.buildErrorBody(errorCode, message));
+  }
+
+  private buildNotFoundException(errorCode: string, message: string) {
+    return new NotFoundException(this.buildErrorBody(errorCode, message));
+  }
+
+  private buildErrorBody(
+    errorCode: string,
+    message: string,
+  ): CompanyDeletionErrorBody {
+    return {
+      success: false,
+      errorCode,
+      message,
+    };
   }
 }

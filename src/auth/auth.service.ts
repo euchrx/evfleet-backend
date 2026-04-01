@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
@@ -35,6 +39,41 @@ export class AuthService {
         role: user.role,
         companyId: user.companyId,
       },
+    };
+  }
+
+  async reauthenticateAdmin(userId: string, password: string) {
+    const normalizedUserId = String(userId || '').trim();
+    const normalizedPassword = String(password || '');
+
+    if (!normalizedUserId) {
+      throw new UnauthorizedException('Usuário autenticado inválido.');
+    }
+
+    const user = await this.users.findAuthCredentialsById(normalizedUserId);
+    if (!user) {
+      throw new UnauthorizedException('Usuário autenticado não encontrado.');
+    }
+
+    if (String(user.role || '').trim().toUpperCase() !== 'ADMIN') {
+      throw new ForbiddenException(
+        'Acesso negado. Esta ação é permitida apenas para ADMIN.',
+      );
+    }
+
+    const passwordMatches = await bcrypt.compare(
+      normalizedPassword,
+      user.password,
+    );
+    if (!passwordMatches) {
+      throw new UnauthorizedException('Senha do administrador incorreta.');
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      companyId: user.companyId,
     };
   }
 }

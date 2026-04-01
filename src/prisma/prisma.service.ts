@@ -4,7 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { RequestScope } from '../common/request-scope';
 
 @Injectable()
@@ -99,3 +99,5 @@ export class PrismaService extends PrismaClient
     }
   }
 }
+
+export { Prisma };

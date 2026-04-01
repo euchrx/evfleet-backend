@@ -1,4 +1,9 @@
-import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ROLES_KEY } from './roles.decorator';
 
@@ -16,6 +21,12 @@ export class RolesGuard implements CanActivate {
 
     const { user } = context.switchToHttp().getRequest();
 
-    return requiredRoles.includes(user.role);
+    if (!user?.role || !requiredRoles.includes(user.role)) {
+      throw new ForbiddenException(
+        'Acesso negado. Esta ação é permitida apenas para ADMIN.',
+      );
+    }
+
+    return true;
   }
 }

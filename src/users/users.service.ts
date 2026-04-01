@@ -147,6 +147,22 @@ export class UsersService {
     });
   }
 
+  async findAuthCredentialsById(id: string) {
+    const userId = String(id || '').trim();
+    if (!userId) return null;
+
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        password: true,
+        role: true,
+        companyId: true,
+      },
+    });
+  }
+
   async findMe(id: string) {
     const authUser = await this.findByIdForAuth(id);
     if (!authUser) {

@@ -14,6 +14,7 @@ import { AllowInadimplenteAccess } from '../auth/allow-inadimplente-access.decor
 import { Roles } from '../auth/roles.decorator';
 import { CompaniesService } from './companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { DeleteCompanyDto } from './dto/delete-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 
 @Controller('companies')
@@ -74,6 +75,30 @@ export class CompaniesController {
   @Roles('ADMIN')
   update(@Param('id') id: string, @Body() dto: UpdateCompanyDto) {
     return this.companiesService.update(id, dto);
+  }
+
+  @Post(':id/delete-authentication')
+  @Roles('ADMIN')
+  validateDeleteAuthentication(
+    @Param('id') id: string,
+    @Body() dto: DeleteCompanyDto,
+    @Req() req: any,
+  ) {
+    return this.companiesService.validateDeleteAuthorization(
+      id,
+      dto,
+      req?.user,
+    );
+  }
+
+  @Post(':id/delete-with-backup')
+  @Roles('ADMIN')
+  deleteWithBackup(
+    @Param('id') id: string,
+    @Body() dto: DeleteCompanyDto,
+    @Req() req: any,
+  ) {
+    return this.companiesService.deleteWithBackup(id, dto, req?.user);
   }
 
   @Delete(':id')
