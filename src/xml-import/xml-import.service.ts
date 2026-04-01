@@ -20,6 +20,7 @@ import { LinkCostRecordDto } from './dto/link-cost-record.dto';
 import { LinkFuelRecordDto } from './dto/link-fuel-record.dto';
 import { LinkMaintenanceRecordDto } from './dto/link-maintenance-record.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { ConfirmProductXmlPreviewDto } from '../retail-products/dto/confirm-product-xml-preview.dto';
 
 type ImportXmlZipInput = {
   companyId: string;
@@ -48,7 +49,13 @@ type FuelXmlPreviewRequestInput = {
   files: FuelXmlPreviewFileInput[];
 };
 
+type ProductXmlPreviewRequestInput = {
+  companyId: string;
+  files: FuelXmlPreviewFileInput[];
+};
+
 type FuelXmlDetectedType = 'FUEL' | 'ARLA' | 'OTHER';
+type ProductXmlDetectedType = 'PRODUCT';
 
 type FuelXmlItemDuplicateCheckInput = {
   companyId: string;
@@ -65,6 +72,16 @@ type FuelXmlItemDuplicateCheckInput = {
 type FuelXmlItemDuplicateCheckResult = {
   duplicate: boolean;
   duplicateReason?: string;
+};
+
+type ProductXmlItemDuplicateCheckInput = {
+  companyId: string;
+  invoiceKey: string;
+  lineIndex: number;
+  productCode?: string;
+  description?: string;
+  quantity?: number;
+  unitPrice?: number;
 };
 
 type FuelXmlGroupDuplicateCheckInput = {
@@ -113,6 +130,30 @@ type FuelXmlPreviewInvoice = {
   odometer?: number;
   items: FuelXmlPreviewItem[];
   consolidated: FuelXmlPreviewConsolidatedGroup[];
+};
+
+type ProductXmlPreviewItem = {
+  lineIndex: number;
+  productCode?: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  detectedType: ProductXmlDetectedType;
+  importable: boolean;
+  duplicate: boolean;
+  duplicateReason?: string | null;
+  category: string;
+};
+
+type ProductXmlPreviewInvoice = {
+  fileName: string;
+  invoiceKey: string;
+  invoiceNumber?: string;
+  issuedAt?: string;
+  supplierName?: string;
+  supplierDocument?: string;
+  items: ProductXmlPreviewItem[];
 };
 
 type ConfirmFuelImportItemInput = {
@@ -206,7 +247,7 @@ export class XmlImportService {
       const rawXml = this.readXmlBuffer(file.buffer);
       const parsedInvoice = this.parseNfeXml(rawXml);
 
-      const previewItems = await Promise.all(
+      const previewItems: FuelXmlPreviewItem[] = await Promise.all(
         parsedInvoice.items.map(async (item) => {
           const classification = this.classifyFuelPreviewItem(
             item.description,
@@ -276,6 +317,98 @@ export class XmlImportService {
         ).length,
         duplicateItems: allItems.filter((item) => item.duplicate).length,
         otherItems: allItems.filter((item) => item.detectedType === 'OTHER').length,
+      },
+      invoices,
+    };
+  }
+
+  async previewProductXmlFiles(input: ProductXmlPreviewRequestInput) {
+    const companyId = String(input.companyId || '').trim();
+    if (!companyId) {
+      throw new BadRequestException('companyId obrigatorio para preview do XML.');
+    }
+
+    const files = Array.isArray(input.files) ? input.files : [];
+    if (files.length === 0) {
+      throw new BadRequestException('Envie ao menos um arquivo XML.');
+    }
+
+    const invoices: ProductXmlPreviewInvoice[] = [];
+    let totalItems = 0;
+    let ignoredFuelItems = 0;
+
+    for (const file of files) {
+      const rawXml = this.readXmlBuffer(file.buffer);
+      const parsedInvoice = this.parseNfeXml(rawXml);
+      totalItems += parsedInvoice.items.length;
+
+      const previewItemsRaw: Array<ProductXmlPreviewItem | null> =
+        await Promise.all(
+        parsedInvoice.items.map(async (item) => {
+          const fuelClassification = this.classifyFuelPreviewItem(
+            item.description,
+            item.productCode,
+          );
+
+          if (fuelClassification.detectedType === 'FUEL' || fuelClassification.detectedType === 'ARLA') {
+            ignoredFuelItems += 1;
+            return null;
+          }
+
+          const duplicateCheck = await this.findRetailProductImportDuplicate({
+            companyId,
+            invoiceKey: parsedInvoice.invoiceKey,
+            lineIndex: item.lineIndex,
+            productCode: item.productCode,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitValue,
+          });
+
+          return {
+            lineIndex: item.lineIndex,
+            productCode: item.productCode,
+            productName: item.description,
+            quantity: item.quantity ?? 0,
+            unitPrice: item.unitValue ?? 0,
+            totalPrice: item.totalValue ?? 0,
+            detectedType: 'PRODUCT',
+            importable: true,
+            duplicate: duplicateCheck.duplicate,
+            duplicateReason: duplicateCheck.duplicateReason || null,
+            category: this.inferRetailProductCategory(
+              item.description,
+              item.productCode,
+            ),
+          } satisfies ProductXmlPreviewItem;
+        }),
+      );
+
+      const filteredPreviewItems: ProductXmlPreviewItem[] = previewItemsRaw
+        .filter((item) => item !== null)
+        .map((item) => item as ProductXmlPreviewItem);
+
+      invoices.push({
+        fileName: String(file.originalname || 'importacao.xml').trim() || 'importacao.xml',
+        invoiceKey: parsedInvoice.invoiceKey,
+        invoiceNumber: parsedInvoice.number,
+        issuedAt: parsedInvoice.issuedAt?.toISOString(),
+        supplierName: parsedInvoice.issuerName,
+        supplierDocument: parsedInvoice.issuerDocument,
+        items: filteredPreviewItems,
+      });
+    }
+
+    const allItems = invoices.flatMap((invoice) => invoice.items);
+
+    return {
+      summary: {
+        totalInvoices: invoices.length,
+        totalItems,
+        importableItems: allItems.filter((item) => item.importable && !item.duplicate)
+          .length,
+        duplicateItems: allItems.filter((item) => item.duplicate).length,
+        ignoredFuelItems,
       },
       invoices,
     };
@@ -383,6 +516,88 @@ export class XmlImportService {
     }
 
     return { duplicate: false };
+  }
+
+  async findRetailProductImportDuplicate(
+    input: ProductXmlItemDuplicateCheckInput,
+  ): Promise<FuelXmlItemDuplicateCheckResult> {
+    const companyId = String(input.companyId || '').trim();
+    const invoiceKey = String(input.invoiceKey || '').trim();
+    const productCode = this.toText(input.productCode);
+
+    if (!companyId || !invoiceKey || !input.lineIndex) {
+      return { duplicate: false };
+    }
+
+    if (productCode) {
+      const primaryDuplicate = await this.prisma.retailProductImportItem.findFirst({
+        where: {
+          sourceInvoiceKey: invoiceKey,
+          sourceInvoiceLineIndex: input.lineIndex,
+          sourceProductCode: this.normalizeRetailProductSourceProductCode(
+            productCode,
+            input.lineIndex,
+          ),
+          retailProductImport: {
+            companyId,
+          },
+        },
+        select: { id: true },
+      });
+
+      if (primaryDuplicate) {
+        return {
+          duplicate: true,
+          duplicateReason:
+            'Item ja importado por chave da nota, linha e codigo do produto.',
+        };
+      }
+    }
+
+    const candidates = await this.prisma.retailProductImportItem.findMany({
+      where: {
+        sourceInvoiceKey: invoiceKey,
+        retailProductImport: {
+          companyId,
+        },
+      },
+      select: {
+        id: true,
+        description: true,
+        quantity: true,
+        unitValue: true,
+        sourceInvoiceLineIndex: true,
+        sourceProductCode: true,
+      },
+      take: 50,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const duplicate = candidates.find((candidate) => {
+      const sameDescription =
+        this.normalizeForClassification([candidate.description]) ===
+        this.normalizeForClassification([String(input.description || '')]);
+      const sameQuantity = this.areCloseNumbers(
+        this.toNumber(candidate.quantity),
+        input.quantity,
+      );
+      const sameUnitPrice = this.areCloseNumbers(
+        this.toNumber(candidate.unitValue),
+        input.unitPrice,
+      );
+
+      return sameDescription && sameQuantity && sameUnitPrice;
+    });
+
+    if (!duplicate) {
+      return { duplicate: false };
+    }
+
+    return {
+      duplicate: true,
+      duplicateReason:
+        'Item semelhante ja existe para a mesma nota considerando descricao, quantidade e valor unitario.',
+    };
   }
 
   async findFuelImportGroupDuplicate(
@@ -1349,6 +1564,7 @@ export class XmlImportService {
         id: true,
         productCode: true,
         description: true,
+        category: true,
         quantity: true,
         unitValue: true,
         totalValue: true,
@@ -1385,14 +1601,92 @@ export class XmlImportService {
     return items
       .map((item) => ({
         ...item,
-        category: this.inferRetailProductCategory(
-          item.description,
-          item.productCode,
-        ),
+        category:
+          this.normalizeRetailProductCategory(item.category) ||
+          this.inferRetailProductCategory(item.description, item.productCode),
       }))
       .filter((item) =>
         normalizedCategory ? item.category === normalizedCategory : true,
       );
+  }
+
+  async confirmProductXmlPreview(
+    companyId: string,
+    dto: ConfirmProductXmlPreviewDto,
+  ) {
+    const normalizedCompanyId = String(companyId || '').trim();
+    if (!normalizedCompanyId) {
+      throw new BadRequestException('companyId obrigatorio para confirmar importacao.');
+    }
+
+    const invoices = Array.isArray(dto.invoices) ? dto.invoices : [];
+    if (invoices.length === 0) {
+      throw new BadRequestException('Nenhuma nota foi enviada para confirmacao.');
+    }
+
+    const totalItemsDetected = invoices.reduce(
+      (acc, invoice) => acc + invoice.items.length,
+      0,
+    );
+    let totalImported = 0;
+    let totalIgnored = 0;
+    let totalDuplicated = 0;
+
+    for (const invoice of invoices) {
+      const selectedImportableItems: ConfirmProductXmlPreviewDto['invoices'][number]['items'] =
+        [];
+
+      for (const item of invoice.items) {
+        if (!item.selected) {
+          if (!item.duplicate && item.importable) {
+            totalIgnored += 1;
+          }
+          continue;
+        }
+
+        if (!item.importable || item.duplicate) {
+          if (item.duplicate) totalDuplicated += 1;
+          else totalIgnored += 1;
+          continue;
+        }
+
+        const duplicateCheck = await this.findRetailProductImportDuplicate({
+          companyId: normalizedCompanyId,
+          invoiceKey: invoice.invoiceKey,
+          lineIndex: item.lineIndex,
+          productCode: item.productCode,
+          description: item.productName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        });
+
+        if (duplicateCheck.duplicate) {
+          totalDuplicated += 1;
+          continue;
+        }
+
+        selectedImportableItems.push(item);
+      }
+
+      if (selectedImportableItems.length === 0) {
+        continue;
+      }
+
+      await this.upsertRetailProductImportFromPreview({
+        companyId: normalizedCompanyId,
+        invoice,
+        items: selectedImportableItems,
+      });
+      totalImported += selectedImportableItems.length;
+    }
+
+    return {
+      totalInvoicesRead: new Set(invoices.map((invoice) => invoice.invoiceKey)).size,
+      totalItemsDetected,
+      totalImported,
+      totalIgnored,
+      totalDuplicated,
+    };
   }
 
   async getRetailProductImportById(companyId: string, retailImportId: string) {
@@ -1854,6 +2148,7 @@ export class XmlImportService {
         data: {
           companyId,
           branchId: invoice.branchId || null,
+          sourceInvoiceKey: invoice.invoiceKey,
           xmlInvoiceId: invoice.id,
           supplierName: invoice.issuerName || null,
           supplierDocument: invoice.issuerDocument || null,
@@ -1865,9 +2160,19 @@ export class XmlImportService {
             create: invoice.items.map((item) => ({
               productCode: this.toText(item.productCode) || null,
               description: this.toText(item.description) || 'Item sem descricao',
+              category: this.inferRetailProductCategory(
+                item.description,
+                item.productCode,
+              ),
               quantity: this.toNumber(item.quantity) ?? null,
               unitValue: this.toNumber(item.unitValue) ?? null,
               totalValue: this.toNumber(item.totalValue) ?? null,
+              sourceInvoiceKey: invoice.invoiceKey,
+              sourceInvoiceLineIndex: this.toInt((item as { lineIndex?: unknown }).lineIndex) ?? null,
+              sourceProductCode: this.normalizeRetailProductSourceProductCode(
+                this.toText(item.productCode),
+                this.toInt((item as { lineIndex?: unknown }).lineIndex),
+              ),
             })),
           },
         },
@@ -2824,6 +3129,15 @@ export class XmlImportService {
     return 'OUTROS';
   }
 
+  private normalizeRetailProductSourceProductCode(
+    productCode?: string | null,
+    lineIndex?: number | null,
+  ) {
+    const normalized = String(productCode || '').trim().toUpperCase();
+    if (normalized) return normalized;
+    return `__LINE_${lineIndex || 0}__`;
+  }
+
   private includesRetailCategoryKeyword(
     normalizedText: string,
     keywords: string[],
@@ -2841,6 +3155,76 @@ export class XmlImportService {
     if (normalized === 'LIMPEZA') return 'LIMPEZA';
     if (normalized === 'OUTROS') return 'OUTROS';
     return '';
+  }
+
+  private async upsertRetailProductImportFromPreview(input: {
+    companyId: string;
+    invoice: ConfirmProductXmlPreviewDto['invoices'][number];
+    items: ConfirmProductXmlPreviewDto['invoices'][number]['items'];
+  }) {
+    const totalAmount = input.items.reduce(
+      (acc, item) => acc + Number(item.totalPrice || 0),
+      0,
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      const existingImport = await tx.retailProductImport.findFirst({
+        where: {
+          companyId: input.companyId,
+          sourceInvoiceKey: input.invoice.invoiceKey,
+        },
+        select: {
+          id: true,
+          totalAmount: true,
+        },
+      });
+
+      const retailImport = existingImport
+        ? await tx.retailProductImport.update({
+            where: { id: existingImport.id },
+            data: {
+              totalAmount: new Prisma.Decimal(
+                this.decimalToNumber(existingImport.totalAmount) + totalAmount,
+              ),
+            },
+            select: { id: true },
+          })
+        : await tx.retailProductImport.create({
+            data: {
+              companyId: input.companyId,
+              sourceInvoiceKey: input.invoice.invoiceKey,
+              supplierName: input.invoice.supplierName || null,
+              supplierDocument: input.invoice.supplierDocument || null,
+              invoiceNumber: input.invoice.invoiceNumber || null,
+              invoiceSeries: null,
+              issuedAt: input.invoice.issuedAt
+                ? new Date(input.invoice.issuedAt)
+                : null,
+              totalAmount: new Prisma.Decimal(totalAmount),
+            },
+            select: { id: true },
+          });
+
+      await tx.retailProductImportItem.createMany({
+        data: input.items.map((item) => ({
+          retailProductImportId: retailImport.id,
+          productCode: item.productCode || null,
+          description: item.productName,
+          category: this.normalizeRetailProductCategory(item.category) || item.category,
+          quantity: new Prisma.Decimal(Number(item.quantity || 0)),
+          unitValue: new Prisma.Decimal(Number(item.unitPrice || 0)),
+          totalValue: new Prisma.Decimal(Number(item.totalPrice || 0)),
+          sourceInvoiceKey: input.invoice.invoiceKey,
+          sourceInvoiceLineIndex: item.lineIndex,
+          sourceProductCode: this.normalizeRetailProductSourceProductCode(
+            item.productCode,
+            item.lineIndex,
+          ),
+        })),
+      });
+
+      return retailImport;
+    });
   }
 
   private mapDetectedFuelTypeToRecordFuelType(detectedFuelType?: string) {

@@ -706,4 +706,191 @@ describe('XmlImportService', () => {
       }),
     ]);
   });
+
+  it('gera preview de produtos ignorando combustivel e arla e classificando categorias', async () => {
+    const prisma = {
+      retailProductImportItem: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    };
+
+    const service = new XmlImportService(prisma as any);
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc>
+  <NFe>
+    <infNFe Id="NFe66666666666666666666666666666666666666666666">
+      <ide>
+        <nNF>654</nNF>
+        <serie>1</serie>
+        <dhEmi>2026-04-01T08:30:00-03:00</dhEmi>
+      </ide>
+      <emit>
+        <xNome>Loja do Posto</xNome>
+        <CNPJ>12345678000100</CNPJ>
+      </emit>
+      <det nItem="1">
+        <prod>
+          <cProd>001</cProd>
+          <xProd>Shampoo automotivo premium</xProd>
+          <qCom>2.0000</qCom>
+          <vUnCom>15.0000</vUnCom>
+          <vProd>30.00</vProd>
+        </prod>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>002</cProd>
+          <xProd>Diesel S10</xProd>
+          <qCom>100.0000</qCom>
+          <vUnCom>6.1500</vUnCom>
+          <vProd>615.00</vProd>
+        </prod>
+      </det>
+      <det nItem="3">
+        <prod>
+          <cProd>003</cProd>
+          <xProd>Óleo lubrificante 15W40</xProd>
+          <qCom>1.0000</qCom>
+          <vUnCom>45.0000</vUnCom>
+          <vProd>45.00</vProd>
+        </prod>
+      </det>
+      <det nItem="4">
+        <prod>
+          <cProd>004</cProd>
+          <xProd>ARLA 32</xProd>
+          <qCom>20.0000</qCom>
+          <vUnCom>2.5000</vUnCom>
+          <vProd>50.00</vProd>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <chNFe>66666666666666666666666666666666666666666666</chNFe>
+      <cStat>100</cStat>
+    </infProt>
+  </protNFe>
+</nfeProc>`;
+
+    const preview = await service.previewProductXmlFiles({
+      companyId: 'company_1',
+      files: [{ buffer: Buffer.from(xml, 'utf-8'), originalname: 'produtos.xml' }],
+    });
+
+    expect(preview.summary).toEqual({
+      totalInvoices: 1,
+      totalItems: 4,
+      importableItems: 2,
+      duplicateItems: 0,
+      ignoredFuelItems: 2,
+    });
+    expect(preview.invoices[0].items).toEqual([
+      expect.objectContaining({
+        lineIndex: 1,
+        detectedType: 'PRODUCT',
+        category: 'PERFUMARIA',
+      }),
+      expect.objectContaining({
+        lineIndex: 3,
+        detectedType: 'PRODUCT',
+        category: 'LUBRIFICANTES',
+      }),
+    ]);
+  });
+
+  it('confirma importacao de produtos por item e bloqueia duplicidade', async () => {
+    const tx = {
+      retailProductImport: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'retail_import_1' }),
+        update: jest.fn(),
+      },
+      retailProductImportItem: {
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+
+    const prisma = {
+      retailProductImportItem: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      $transaction: jest.fn(async (callback: any) => callback(tx)),
+    };
+
+    const service = new XmlImportService(prisma as any);
+
+    const result = await service.confirmProductXmlPreview('company_1', {
+      invoices: [
+        {
+          fileName: 'produtos.xml',
+          invoiceKey: '77777777777777777777777777777777777777777777',
+          invoiceNumber: '777',
+          issuedAt: '2026-04-01T08:30:00.000Z',
+          supplierName: 'Loja do Posto',
+          supplierDocument: '12345678000100',
+          items: [
+            {
+              selected: true,
+              lineIndex: 1,
+              productCode: 'PRD-1',
+              productName: 'Shampoo automotivo',
+              quantity: 2,
+              unitPrice: 15,
+              totalPrice: 30,
+              detectedType: 'PRODUCT',
+              importable: true,
+              duplicate: false,
+              duplicateReason: null,
+              category: 'PERFUMARIA',
+            },
+            {
+              selected: false,
+              lineIndex: 2,
+              productCode: 'PRD-2',
+              productName: 'Sabonete',
+              quantity: 1,
+              unitPrice: 6,
+              totalPrice: 6,
+              detectedType: 'PRODUCT',
+              importable: true,
+              duplicate: false,
+              duplicateReason: null,
+              category: 'PERFUMARIA',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(tx.retailProductImport.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          companyId: 'company_1',
+          sourceInvoiceKey: '77777777777777777777777777777777777777777777',
+        }),
+      }),
+    );
+    expect(tx.retailProductImportItem.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            description: 'Shampoo automotivo',
+            category: 'PERFUMARIA',
+            sourceInvoiceLineIndex: 1,
+          }),
+        ]),
+      }),
+    );
+    expect(result).toEqual({
+      totalInvoicesRead: 1,
+      totalItemsDetected: 2,
+      totalImported: 1,
+      totalIgnored: 1,
+      totalDuplicated: 0,
+    });
+  });
 });

@@ -664,7 +664,7 @@ model XmlInvoice {
   branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   items XmlInvoiceItem[]
-  retailProductImport RetailProductImport? @relation("RetailProductImportSource")
+  retailProductImports RetailProductImport[] @relation("RetailProductImportSource")
 
   @@index([batchId])
   @@index([companyId])
@@ -699,6 +699,7 @@ model RetailProductImport {
   invoiceSeries    String?
   issuedAt         DateTime?
   totalAmount      Decimal? @db.Decimal(14, 2)
+  sourceInvoiceKey String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -708,27 +709,34 @@ model RetailProductImport {
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
-  xmlInvoiceId String   @unique
-  xmlInvoice   XmlInvoice @relation("RetailProductImportSource", fields: [xmlInvoiceId], references: [id], onDelete: Restrict)
+  xmlInvoiceId String?   
+  xmlInvoice   XmlInvoice? @relation("RetailProductImportSource", fields: [xmlInvoiceId], references: [id], onDelete: Restrict)
 
   items RetailProductImportItem[]
 
   @@index([companyId])
   @@index([branchId])
   @@index([issuedAt])
+  @@index([sourceInvoiceKey])
 }
 
 model RetailProductImportItem {
   id          String   @id @default(uuid())
   productCode String?
   description String
+  category    String?
   quantity    Decimal? @db.Decimal(14, 4)
   unitValue   Decimal? @db.Decimal(14, 4)
   totalValue  Decimal? @db.Decimal(14, 2)
+  sourceInvoiceKey String?
+  sourceInvoiceLineIndex Int?
+  sourceProductCode String?
   createdAt   DateTime @default(now())
 
   retailProductImportId String
   retailProductImport   RetailProductImport @relation(fields: [retailProductImportId], references: [id], onDelete: Cascade)
 
   @@index([retailProductImportId])
+  @@index([sourceInvoiceKey, sourceInvoiceLineIndex])
+  @@unique([sourceInvoiceKey, sourceInvoiceLineIndex, sourceProductCode])
 }
