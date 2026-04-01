@@ -94,11 +94,9 @@ export class CompanyBackupService {
     const branches = await client.branch.findMany({ where: { companyId } });
     const branchIds = branches.map((item) => item.id);
 
-    const vehicles = branchIds.length
-      ? await client.vehicle.findMany({
-          where: { branchId: { in: branchIds } },
-        })
-      : [];
+    const vehicles = await client.vehicle.findMany({
+      where: { companyId },
+    });
     const vehicleIds = vehicles.map((item) => item.id);
 
     const drivers = vehicleIds.length

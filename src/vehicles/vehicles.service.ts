@@ -47,11 +47,7 @@ export class VehiclesService {
     if (!Number.isFinite(vehicleLimit) || vehicleLimit <= 0) return;
 
     const currentVehicles = await this.prisma.vehicle.count({
-      where: {
-        branch: {
-          companyId: normalizedCompanyId,
-        },
-      },
+      where: { companyId: normalizedCompanyId },
     });
 
     if (currentVehicles >= vehicleLimit) {
@@ -61,19 +57,11 @@ export class VehiclesService {
     }
   }
 
-  private async resolveBranchIdForCreate(
-    inputBranchId: string | undefined,
-    context?: { role?: string; userCompanyId?: string; scopeCompanyId?: string },
-  ) {
-    const branchId = String(inputBranchId || '').trim();
-    if (branchId) {
-      const branchExists = await this.prisma.branch.findUnique({
-        where: { id: branchId },
-        select: { id: true },
-      });
-      if (branchExists) return branchExists.id;
-    }
-
+  private resolveCompanyIdFromContext(context?: {
+    role?: string;
+    userCompanyId?: string;
+    scopeCompanyId?: string;
+  }) {
     const role = String(context?.role || '').trim().toUpperCase();
     const companyId =
       role === 'ADMIN'
@@ -89,34 +77,36 @@ export class VehiclesService {
       throw new BadRequestException('Usuario sem companyId vinculado.');
     }
 
-    const firstBranch = await this.prisma.branch.findFirst({
-      where: { companyId },
-      orderBy: { createdAt: 'asc' },
+    return companyId;
+  }
+
+  private async validateOptionalBranchId(
+    inputBranchId: string | undefined,
+    companyId: string,
+  ) {
+    const branchId = String(inputBranchId || '').trim();
+    if (!branchId) return null;
+
+    const branchExists = await this.prisma.branch.findFirst({
+      where: { id: branchId, companyId },
       select: { id: true },
     });
 
-    if (firstBranch) return firstBranch.id;
-
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { id: true, name: true },
-    });
-
-    if (!company) {
-      throw new BadRequestException('Empresa vinculada nao encontrada.');
+    if (!branchExists) {
+      throw new BadRequestException(
+        'A filial informada nao pertence a empresa selecionada.',
+      );
     }
 
-    const createdBranch = await this.prisma.branch.create({
-      data: {
-        companyId: company.id,
-        name: company.name,
-        city: 'Nao informado',
-        state: 'NI',
-      },
-      select: { id: true },
-    });
+    return branchExists.id;
+  }
 
-    return createdBranch.id;
+  private async resolveBranchIdForCreate(
+    inputBranchId: string | undefined,
+    context?: { role?: string; userCompanyId?: string; scopeCompanyId?: string },
+  ) {
+    const companyId = this.resolveCompanyIdFromContext(context);
+    return this.validateOptionalBranchId(inputBranchId, companyId);
   }
 
   private withProfilePhotoUrl<T extends { id: string; profilePhoto?: { id: string } | null }>(
@@ -251,17 +241,14 @@ export class VehiclesService {
     dto: CreateVehicleDto,
     context?: { role?: string; userCompanyId?: string; scopeCompanyId?: string },
   ) {
-    const resolvedBranchId = await this.resolveBranchIdForCreate(dto.branchId, context);
-    const branch = await this.prisma.branch.findUnique({
-      where: { id: resolvedBranchId },
-      select: { companyId: true },
-    });
+    const companyId = this.resolveCompanyIdFromContext(context);
+    const resolvedBranchId = await this.resolveBranchIdForCreate(
+      dto.branchId,
+      context,
+    );
 
-    if (!branch?.companyId) {
-      throw new BadRequestException('Empresa vinculada à filial não encontrada.');
-    }
 
-    await this.enforceVehicleLimitForCompany(branch.companyId);
+    await this.enforceVehicleLimitForCompany(companyId);
 
     const plate = this.normalizeText(dto.plate)?.toUpperCase() || '';
     const chassis = this.normalizeText(dto.chassis)?.toUpperCase() || null;
@@ -286,7 +273,10 @@ export class VehiclesService {
           status: dto.status ?? 'ACTIVE',
           photoUrls: dto.photoUrls ?? [],
           documentUrls: dto.documentUrls ?? [],
-          branch: { connect: { id: resolvedBranchId } },
+          company: { connect: { id: companyId } },
+          ...(resolvedBranchId
+            ? { branch: { connect: { id: resolvedBranchId } } }
+            : {}),
         },
         include: { branch: true, costCenter: true, profilePhoto: { select: { id: true } } },
       });
@@ -443,9 +433,9 @@ export class VehiclesService {
       throw new BadRequestException('Envie ao menos um campo para atualizar.');
     }
 
-    if (dto.branchId) {
-      const exists = await this.prisma.branch.findUnique({
-        where: { id: dto.branchId },
+    if (dto.branchId !== undefined && dto.branchId !== null) {
+      const exists = await this.prisma.branch.findFirst({
+        where: { id: dto.branchId, companyId: current.companyId },
         select: { id: true },
       });
 
@@ -485,7 +475,11 @@ export class VehiclesService {
             ...(dto.acquisitionDate !== undefined
               ? { acquisitionDate: acquisitionDate ? new Date(acquisitionDate) : null }
               : {}),
-            ...(branchId ? { branch: { connect: { id: branchId } } } : {}),
+            ...(branchId !== undefined
+              ? branchId
+                ? { branch: { connect: { id: branchId } } }
+                : { branch: { disconnect: true } }
+              : {}),
           },
           include: { branch: true, costCenter: true, profilePhoto: { select: { id: true } } },
         });

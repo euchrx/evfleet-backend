@@ -345,12 +345,10 @@ export class CompanyDeletionService {
     });
     const branchIds = branches.map((item) => item.id);
 
-    const vehicles = branchIds.length
-      ? await tx.vehicle.findMany({
-          where: { branchId: { in: branchIds } },
-          select: { id: true },
-        })
-      : [];
+    const vehicles = await tx.vehicle.findMany({
+      where: { companyId },
+      select: { id: true },
+    });
     const vehicleIds = vehicles.map((item) => item.id);
 
     const drivers = vehicleIds.length

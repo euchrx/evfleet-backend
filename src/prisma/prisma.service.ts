@@ -73,9 +73,9 @@ export class PrismaService extends PrismaClient
       case 'WebhookEvent':
         return { companyId };
       case 'Vehicle':
-        return { branch: { companyId } };
+        return { companyId };
       case 'Driver':
-        return { vehicle: { branch: { companyId } } };
+        return { vehicle: { companyId } };
       case 'MaintenanceRecord':
       case 'MaintenancePlan':
       case 'Debt':
@@ -84,14 +84,14 @@ export class PrismaService extends PrismaClient
       case 'VehicleDocument':
       case 'VehicleChangeLog':
       case 'VehicleProfilePhoto':
-        return { vehicle: { branch: { companyId } } };
+        return { vehicle: { companyId } };
       case 'Tire':
-        return { vehicle: { branch: { companyId } } };
+        return { vehicle: { companyId } };
       case 'TireReading':
         return {
           OR: [
-            { vehicle: { branch: { companyId } } },
-            { tire: { vehicle: { branch: { companyId } } } },
+            { vehicle: { companyId } },
+            { tire: { vehicle: { companyId } } },
           ],
         };
       default:

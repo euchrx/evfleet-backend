@@ -27,6 +27,7 @@ export class ReportsService {
     const branchCosts = new Map<string, number>();
 
     vehicles.forEach((vehicle) => {
+      if (!vehicle.branchId) return;
       const totalCost = costByVehicleId.get(vehicle.id) ?? 0;
       const currentTotal = branchCosts.get(vehicle.branchId) ?? 0;
       branchCosts.set(vehicle.branchId, currentTotal + totalCost);

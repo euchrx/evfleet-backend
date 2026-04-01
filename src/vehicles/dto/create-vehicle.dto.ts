@@ -97,5 +97,5 @@ export class CreateVehicleDto {
 
   @IsOptional()
   @IsUUID()
-  branchId: string;
+  branchId?: string;
 }

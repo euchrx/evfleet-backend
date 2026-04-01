@@ -24,6 +24,7 @@ model Company {
   updatedAt DateTime @updatedAt
 
   branches Branch[]
+  vehicles Vehicle[]
   users    User[]
   subscriptions Subscription[]
   payments      Payment[]
@@ -73,8 +74,11 @@ model Vehicle {
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
-  branchId      String
-  branch        Branch     @relation(fields: [branchId], references: [id])
+  companyId     String
+  company       Company    @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  branchId      String?
+  branch        Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   costCenterId  String?
   costCenter    CostCenter? @relation(fields: [costCenterId], references: [id])
@@ -90,6 +94,9 @@ model Vehicle {
   tireReadings       TireReading[]
   changeLogs         VehicleChangeLog[]
   profilePhoto       VehicleProfilePhoto?
+
+  @@index([companyId])
+  @@index([branchId])
 }
 
 model VehicleProfilePhoto {

@@ -1902,7 +1902,10 @@ export class XmlImportService {
     return vehicle;
   }
 
-  private async validateBranchId(branchId: string, companyId: string) {
+  private async validateBranchId(
+    branchId: string | null | undefined,
+    companyId: string,
+  ) {
     if (!branchId) return;
     const branch = await this.prisma.branch.findFirst({
       where: { id: branchId, companyId },

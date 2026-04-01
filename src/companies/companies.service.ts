@@ -72,15 +72,6 @@ export class CompaniesService {
           },
         });
 
-        await tx.branch.create({
-          data: {
-            name: normalizedName,
-            city: 'Nao informado',
-            state: 'NI',
-            companyId: createdCompany.id,
-          },
-        });
-
         const now = new Date();
         const trialEndsAt = this.addDays(now, this.TRIAL_DAYS);
         await tx.subscription.create({

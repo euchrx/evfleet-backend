@@ -86,5 +86,5 @@ export class UpdateVehicleDto {
 
   @IsOptional()
   @IsUUID()
-  branchId?: string;
+  branchId?: string | null;
 }
