@@ -19,7 +19,9 @@ export class UsersController {
   @Post()
   create(@Body() dto: CreateUserDto, @Req() req: any) {
     const companyId =
-      dto.companyId || req?.companyScopeId || req?.user?.companyId;
+      dto.role === 'ADMIN'
+        ? dto.companyId
+        : dto.companyId || req?.companyScopeId || req?.user?.companyId;
 
     return this.usersService.create({
       ...dto,

@@ -21,7 +21,7 @@ export class UsersService {
     if (existing) throw new BadRequestException('Email já cadastrado');
 
     const passwordHash = await bcrypt.hash(data.password, 10);
-    const companyId = await this.resolveCompanyId(data.companyId);
+    const companyId = await this.resolveCompanyId(data.role, data.companyId);
 
     return this.prisma.user.create({
       data: {
@@ -182,11 +182,18 @@ export class UsersService {
     });
   }
 
-  private async resolveCompanyId(inputCompanyId?: string) {
+  private async resolveCompanyId(
+    role: CreateUserDto['role'],
+    inputCompanyId?: string,
+  ) {
     const companyId = String(inputCompanyId || '').trim();
     if (!companyId) {
+      if (role === 'ADMIN') {
+        return null;
+      }
+
       throw new BadRequestException(
-        'companyId obrigatorio para criar usuario no modo multiempresa.',
+        'Selecione uma empresa para criar usuários gestores.',
       );
     }
 
