@@ -23,18 +23,22 @@ export class CompanyScopeInterceptor implements NestInterceptor {
     const req = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const user = req?.user;
 
-    if (!user?.companyId) {
+    if (!user?.role) {
       return next.handle();
     }
 
     const requestedScope = this.readHeader(req, 'x-company-scope');
     const selectedCompanyId = this.resolveCompanyScope(
       user.role || '',
-      user.companyId,
+      user.companyId || '',
       requestedScope,
     );
 
     req.companyScopeId = selectedCompanyId;
+
+    if (!selectedCompanyId) {
+      return next.handle();
+    }
 
     return RequestScope.run({ companyId: selectedCompanyId }, () => next.handle());
   }
