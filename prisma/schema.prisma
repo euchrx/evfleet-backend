@@ -129,6 +129,7 @@ enum FuelType {
   GASOLINE
   ETHANOL
   DIESEL
+  ARLA32
   FLEX
   ELECTRIC
   HYBRID
@@ -262,7 +263,7 @@ enum DebtCategory {
 
 model FuelRecord {
   id         String   @id @default(uuid())
-  invoiceNumber String? @unique
+  invoiceNumber String?
   liters     Float
   totalValue Float
   km         Int
@@ -273,6 +274,11 @@ model FuelRecord {
   anomalyReason String?
   fuelDate   DateTime
   createdAt  DateTime @default(now())
+  sourceInvoiceKey String?
+  sourceInvoiceLineIndex Int?
+  sourceProductCode String?
+  sourcePlate String?
+  sourceFuelDateTime DateTime?
 
   vehicleId String?
   vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
@@ -282,6 +288,9 @@ model FuelRecord {
   @@index([vehicleId])
   @@index([driverId])
   @@index([isAnomaly])
+  @@index([invoiceNumber])
+  @@index([sourceInvoiceKey, sourceInvoiceLineIndex])
+  @@unique([sourceInvoiceKey, sourceInvoiceLineIndex, sourceProductCode])
 }
 
 model VehicleChangeLog {

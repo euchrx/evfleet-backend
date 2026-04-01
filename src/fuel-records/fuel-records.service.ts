@@ -3,14 +3,19 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { FuelType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { XmlImportService } from '../xml-import/xml-import.service';
 import { CreateFuelRecordDto } from './dto/create-fuel-record.dto';
+import { ConfirmFuelXmlPreviewDto } from './dto/confirm-fuel-xml-preview.dto';
 import { UpdateFuelRecordDto } from './dto/update-fuel-record.dto';
 
 @Injectable()
 export class FuelRecordsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly xmlImportService: XmlImportService,
+  ) {}
 
   private readonly includeVehicle = {
     vehicle: {
@@ -27,28 +32,21 @@ export class FuelRecordsService {
     return normalized || null;
   }
 
-  private async ensureInvoiceNumberAvailable(
-    invoiceNumber?: string | null,
-    ignoreId?: string,
+  private normalizePlate(value?: string | null) {
+    const normalized = String(value || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+    return normalized || null;
+  }
+
+  private normalizeSourceProductCode(
+    productCode?: string | null,
+    lineIndex?: number,
   ) {
-    const normalized = this.normalizeInvoiceNumber(invoiceNumber);
-    if (!normalized) return null;
-
-    const existing = await (this.prisma as any).fuelRecord.findFirst({
-      where: {
-        invoiceNumber: normalized,
-        ...(ignoreId ? { id: { not: ignoreId } } : {}),
-      },
-      select: { id: true },
-    });
-
-    if (existing) {
-      throw new BadRequestException(
-        `Nota ${normalized} já cadastrada. Não é permitido duplicar notas.`,
-      );
-    }
-
-    return normalized;
+    const normalized = String(productCode || '').trim().toUpperCase();
+    if (normalized) return normalized;
+    return `__LINE_${lineIndex || 0}__`;
   }
 
   private async calculateConsumption(
@@ -62,17 +60,18 @@ export class FuelRecordsService {
       where: {
         vehicleId,
         ...(ignoreRecordId ? { id: { not: ignoreRecordId } } : {}),
-        OR: [
-          { fuelDate: { lt: fuelDate } },
-          { fuelDate, km: { lt: km } },
-        ],
+        OR: [{ fuelDate: { lt: fuelDate } }, { fuelDate, km: { lt: km } }],
       },
       orderBy: [{ fuelDate: 'desc' }, { km: 'desc' }],
       select: { km: true },
     });
 
     if (!previous) {
-      return { averageConsumptionKmPerLiter: null, isAnomaly: false, anomalyReason: null };
+      return {
+        averageConsumptionKmPerLiter: null,
+        isAnomaly: false,
+        anomalyReason: null,
+      };
     }
 
     const deltaKm = km - previous.km;
@@ -100,15 +99,17 @@ export class FuelRecordsService {
       };
     }
 
-    return { averageConsumptionKmPerLiter: avg, isAnomaly: false, anomalyReason: null };
+    return {
+      averageConsumptionKmPerLiter: avg,
+      isAnomaly: false,
+      anomalyReason: null,
+    };
   }
 
   async create(dto: CreateFuelRecordDto) {
     await this.ensureVehicleExists(dto.vehicleId);
     if (dto.driverId) await this.ensureDriverExists(dto.driverId);
-    const invoiceNumber = await this.ensureInvoiceNumberAvailable(
-      dto.invoiceNumber,
-    );
+    const invoiceNumber = this.normalizeInvoiceNumber(dto.invoiceNumber);
 
     const fuelDate = new Date(dto.fuelDate);
     const consumption = await this.calculateConsumption(
@@ -118,39 +119,145 @@ export class FuelRecordsService {
       fuelDate,
     );
 
-    let created: any;
-    try {
-      created = await (this.prisma as any).fuelRecord.create({
-        data: {
-          liters: dto.liters,
-          totalValue: dto.totalValue,
-          km: Math.round(dto.km),
-          station: dto.station,
-          invoiceNumber,
-          fuelType: dto.fuelType,
-          fuelDate,
-          vehicleId: dto.vehicleId,
-          driverId: dto.driverId ?? null,
-          averageConsumptionKmPerLiter: consumption.averageConsumptionKmPerLiter,
-          isAnomaly: consumption.isAnomaly,
-          anomalyReason: consumption.anomalyReason,
-        },
-        include: this.includeVehicle,
-      });
-    } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
-        throw new BadRequestException(
-          `Nota ${invoiceNumber || dto.invoiceNumber || ''} ja cadastrada. Nao e permitido duplicar notas.`,
-        );
-      }
-      throw error;
+    const created = await (this.prisma as any).fuelRecord.create({
+      data: {
+        liters: dto.liters,
+        totalValue: dto.totalValue,
+        km: Math.round(dto.km),
+        station: dto.station,
+        invoiceNumber,
+        fuelType: dto.fuelType,
+        fuelDate,
+        vehicleId: dto.vehicleId,
+        driverId: dto.driverId ?? null,
+        averageConsumptionKmPerLiter: consumption.averageConsumptionKmPerLiter,
+        isAnomaly: consumption.isAnomaly,
+        anomalyReason: consumption.anomalyReason,
+      },
+      include: this.includeVehicle,
+    });
+
+    if (created.vehicleId) {
+      await this.updateVehicleKm(created.vehicleId, created.km);
+    }
+    return created;
+  }
+
+  async previewXmlImport(
+    companyId: string,
+    files: Array<{ buffer?: Buffer; originalname?: string }>,
+  ) {
+    return this.xmlImportService.previewFuelXmlFiles({
+      companyId,
+      files: files
+        .filter((file): file is { buffer: Buffer; originalname?: string } =>
+          Boolean(file?.buffer?.length),
+        )
+        .map((file) => ({
+          buffer: file.buffer,
+          originalname: file.originalname,
+        })),
+    });
+  }
+
+  async confirmXmlImport(companyId: string, dto: ConfirmFuelXmlPreviewDto) {
+    const normalizedCompanyId = String(companyId || '').trim();
+    if (!normalizedCompanyId) {
+      throw new BadRequestException('companyId obrigatorio para confirmar importacao.');
     }
 
-    await this.updateVehicleKm(created.vehicleId, created.km);
-    return created;
+    const invoices = Array.isArray(dto.invoices) ? dto.invoices : [];
+    if (invoices.length === 0) {
+      throw new BadRequestException('Nenhuma nota foi enviada para confirmacao.');
+    }
+
+    const totalItemsDetected = invoices.reduce(
+      (acc, invoice) => acc + invoice.items.length,
+      0,
+    );
+    const totalDuplicados = invoices.reduce(
+      (acc, invoice) => acc + invoice.items.filter((item) => item.duplicate).length,
+      0,
+    );
+
+    let totalImportados = 0;
+    let totalIgnorados = 0;
+
+    for (const invoice of invoices) {
+      for (const item of invoice.items) {
+        if (!item.selected) {
+          if (!item.duplicate) {
+            totalIgnorados += 1;
+          }
+          continue;
+        }
+
+        if (!item.importable || item.duplicate) {
+          if (!item.duplicate) {
+            totalIgnorados += 1;
+          }
+          continue;
+        }
+
+        const duplicateCheck = await this.xmlImportService.findFuelImportDuplicate({
+          companyId: normalizedCompanyId,
+          invoiceKey: invoice.invoiceKey,
+          invoiceNumber: invoice.invoiceNumber,
+          lineIndex: item.lineIndex,
+          productCode: item.productCode,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          plate: invoice.plate,
+          fuelDateTime: item.fuelDateTime ? new Date(item.fuelDateTime) : undefined,
+        });
+
+        if (duplicateCheck.duplicate) {
+          continue;
+        }
+
+        const vehicle = await this.resolveVehicleForImport(
+          normalizedCompanyId,
+          invoice.plate,
+        );
+        if (!vehicle) {
+          totalIgnorados += 1;
+          continue;
+        }
+
+        try {
+          await this.createImportedFuelRecord({
+            companyId: normalizedCompanyId,
+            vehicleId: vehicle.id,
+            currentKm: vehicle.currentKm,
+            invoiceKey: invoice.invoiceKey,
+            invoiceNumber: invoice.invoiceNumber,
+            supplierName: invoice.supplierName,
+            plate: invoice.plate,
+            odometer: invoice.odometer,
+            lineIndex: item.lineIndex,
+            productCode: item.productCode,
+            quantity: item.quantity,
+            totalPrice: item.totalPrice,
+            detectedFuelType: item.detectedFuelType,
+            fuelDateTime: item.fuelDateTime,
+          });
+          totalImportados += 1;
+        } catch (error) {
+          if (this.isFuelXmlDuplicateConflict(error)) {
+            continue;
+          }
+          throw error;
+        }
+      }
+    }
+
+    return {
+      totalInvoicesRead: new Set(invoices.map((invoice) => invoice.invoiceKey)).size,
+      totalItemsDetected,
+      totalImported: totalImportados,
+      totalIgnored: totalIgnorados,
+      totalDuplicated: totalDuplicados + Math.max(0, totalItemsDetected - totalImportados - totalIgnorados - totalDuplicados),
+    };
   }
 
   async findAll() {
@@ -168,7 +275,15 @@ export class FuelRecordsService {
 
     const comparisonMap = new Map<
       string,
-      { vehicleId: string; label: string; liters: number; value: number; avgSum: number; avgCount: number; anomalies: number }
+      {
+        vehicleId: string;
+        label: string;
+        liters: number;
+        value: number;
+        avgSum: number;
+        avgCount: number;
+        anomalies: number;
+      }
     >();
 
     for (const record of records) {
@@ -202,7 +317,9 @@ export class FuelRecordsService {
         liters: Number(item.liters.toFixed(2)),
         totalValue: Number(item.value.toFixed(2)),
         averageConsumptionKmPerLiter:
-          item.avgCount > 0 ? Number((item.avgSum / item.avgCount).toFixed(2)) : null,
+          item.avgCount > 0
+            ? Number((item.avgSum / item.avgCount).toFixed(2))
+            : null,
         anomalies: item.anomalies,
       }))
       .sort((a, b) => b.totalValue - a.totalValue);
@@ -212,7 +329,9 @@ export class FuelRecordsService {
       .map((record) => ({
         id: record.id,
         date: record.fuelDate,
-        vehicle: record.vehicle ? `${record.vehicle.plate} - ${record.vehicle.model}` : record.vehicleId,
+        vehicle: record.vehicle
+          ? `${record.vehicle.plate} - ${record.vehicle.model}`
+          : record.vehicleId,
         driver: record.driver?.name || 'Sem motorista',
         averageConsumptionKmPerLiter: record.averageConsumptionKmPerLiter,
         reason: record.anomalyReason || 'Consumo fora da faixa',
@@ -253,13 +372,15 @@ export class FuelRecordsService {
     }
     const invoiceNumber =
       dto.invoiceNumber !== undefined
-        ? await this.ensureInvoiceNumberAvailable(dto.invoiceNumber, id)
+        ? this.normalizeInvoiceNumber(dto.invoiceNumber)
         : undefined;
 
     const nextVehicleId = dto.vehicleId ?? previous.vehicleId;
     const nextKm = dto.km !== undefined ? Math.round(dto.km) : previous.km;
     const nextLiters = dto.liters !== undefined ? dto.liters : previous.liters;
-    const nextFuelDate = dto.fuelDate ? new Date(dto.fuelDate) : new Date(previous.fuelDate);
+    const nextFuelDate = dto.fuelDate
+      ? new Date(dto.fuelDate)
+      : new Date(previous.fuelDate);
 
     const consumption = await this.calculateConsumption(
       nextVehicleId,
@@ -278,7 +399,9 @@ export class FuelRecordsService {
         ...(dto.station !== undefined ? { station: dto.station } : {}),
         ...(dto.invoiceNumber !== undefined ? { invoiceNumber } : {}),
         ...(dto.fuelType !== undefined ? { fuelType: dto.fuelType } : {}),
-        ...(dto.fuelDate !== undefined ? { fuelDate: new Date(dto.fuelDate) } : {}),
+        ...(dto.fuelDate !== undefined
+          ? { fuelDate: new Date(dto.fuelDate) }
+          : {}),
         ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
         ...(dto.driverId !== undefined ? { driverId: dto.driverId } : {}),
         averageConsumptionKmPerLiter: consumption.averageConsumptionKmPerLiter,
@@ -288,8 +411,10 @@ export class FuelRecordsService {
       include: this.includeVehicle,
     });
 
-    await this.updateVehicleKm(updated.vehicleId, updated.km);
-    if (previous.vehicleId !== updated.vehicleId) {
+    if (updated.vehicleId) {
+      await this.updateVehicleKm(updated.vehicleId, updated.km);
+    }
+    if (previous.vehicleId && previous.vehicleId !== updated.vehicleId) {
       await this.recalculateVehicleKm(previous.vehicleId);
     }
 
@@ -299,7 +424,9 @@ export class FuelRecordsService {
   async remove(id: string) {
     const record = await this.findOne(id);
     await (this.prisma as any).fuelRecord.delete({ where: { id } });
-    await this.recalculateVehicleKm(record.vehicleId);
+    if (record.vehicleId) {
+      await this.recalculateVehicleKm(record.vehicleId);
+    }
     return { message: 'Abastecimento removido com sucesso' };
   }
 
@@ -332,6 +459,119 @@ export class FuelRecordsService {
     });
 
     if (!driver) throw new NotFoundException('Motorista nao encontrado');
+  }
+
+  private async resolveVehicleForImport(companyId: string, plate?: string) {
+    const normalizedPlate = this.normalizePlate(plate);
+    if (!normalizedPlate) return null;
+
+    return this.prisma.vehicle.findFirst({
+      where: {
+        companyId,
+        plate: normalizedPlate,
+      },
+      select: {
+        id: true,
+        currentKm: true,
+      },
+    });
+  }
+
+  private mapDetectedFuelTypeToRecordFuelType(detectedFuelType?: string) {
+    const normalized = String(detectedFuelType || '').trim().toUpperCase();
+
+    switch (normalized) {
+      case 'ETHANOL':
+        return FuelType.ETHANOL;
+      case 'DIESEL':
+      case 'S10':
+      case 'S500':
+        return FuelType.DIESEL;
+      case 'ARLA32':
+        return FuelType.ARLA32;
+      case 'FLEX':
+        return FuelType.FLEX;
+      default:
+        return FuelType.GASOLINE;
+    }
+  }
+
+  private async createImportedFuelRecord(input: {
+    companyId: string;
+    vehicleId: string;
+    currentKm: number;
+    invoiceKey: string;
+    invoiceNumber?: string;
+    supplierName?: string;
+    plate?: string;
+    odometer?: number;
+    lineIndex: number;
+    productCode?: string;
+    quantity: number;
+    totalPrice: number;
+    detectedFuelType?: string;
+    fuelDateTime?: string;
+  }) {
+    const liters = Number(input.quantity || 0);
+    if (!(liters > 0)) {
+      throw new BadRequestException('Quantidade do item deve ser maior que zero.');
+    }
+
+    const fuelDate =
+      (input.fuelDateTime ? new Date(input.fuelDateTime) : null) || new Date();
+    const km =
+      typeof input.odometer === 'number' && input.odometer >= 0
+        ? Math.round(input.odometer)
+        : input.currentKm;
+    const sourceProductCode = this.normalizeSourceProductCode(
+      input.productCode,
+      input.lineIndex,
+    );
+
+    const consumption = await this.calculateConsumption(
+      input.vehicleId,
+      km,
+      liters,
+      fuelDate,
+    );
+
+    const created = await this.prisma.fuelRecord.create({
+      data: {
+        invoiceNumber:
+          this.normalizeInvoiceNumber(input.invoiceNumber) || input.invoiceKey,
+        liters,
+        totalValue: Number(input.totalPrice || 0),
+        km,
+        station: String(input.supplierName || 'Fornecedor nao informado').trim(),
+        fuelType: this.mapDetectedFuelTypeToRecordFuelType(
+          input.detectedFuelType,
+        ),
+        fuelDate,
+        vehicleId: input.vehicleId,
+        driverId: null,
+        averageConsumptionKmPerLiter: consumption.averageConsumptionKmPerLiter,
+        isAnomaly: consumption.isAnomaly,
+        anomalyReason: consumption.anomalyReason,
+        sourceInvoiceKey: input.invoiceKey,
+        sourceInvoiceLineIndex: input.lineIndex,
+        sourceProductCode,
+        sourcePlate: this.normalizePlate(input.plate),
+        sourceFuelDateTime: fuelDate,
+      },
+      include: this.includeVehicle,
+    });
+
+    if (created.vehicleId) {
+      await this.updateVehicleKm(created.vehicleId, created.km);
+    }
+    return created;
+  }
+
+  private isFuelXmlDuplicateConflict(error: unknown) {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    );
   }
 
   private async updateVehicleKm(vehicleId: string, km: number) {

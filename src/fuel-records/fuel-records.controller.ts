@@ -10,13 +10,15 @@ import {
   Query,
   Req,
   UploadedFile,
+  UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { FuelRecordsService } from './fuel-records.service';
 import { CreateFuelRecordDto } from './dto/create-fuel-record.dto';
 import { UpdateFuelRecordDto } from './dto/update-fuel-record.dto';
 import { ConfirmFuelXmlImportDto } from './dto/confirm-fuel-xml-import.dto';
+import { ConfirmFuelXmlPreviewDto } from './dto/confirm-fuel-xml-preview.dto';
 import { ImportXmlZipDto } from '../xml-import/dto/import-xml-zip.dto';
 import { LinkFuelRecordDto } from '../xml-import/dto/link-fuel-record.dto';
 import { XmlImportService } from '../xml-import/xml-import.service';
@@ -103,6 +105,51 @@ export class FuelRecordsController {
       companyId: this.resolveCompanyIdFromUser(req),
       imports: dto.imports,
     });
+  }
+
+  @Post('xml/preview')
+  @UseInterceptors(FilesInterceptor('files', 20))
+  previewFuelXml(
+    @UploadedFiles()
+    files:
+      | Array<{ buffer?: Buffer; originalname?: string; mimetype?: string }>
+      | undefined,
+    @Req() req: any,
+  ) {
+    const validFiles = Array.isArray(files)
+      ? files.filter((file) => file?.buffer?.length)
+      : [];
+
+    if (validFiles.length === 0) {
+      throw new BadRequestException(
+        'Envie ao menos um arquivo XML valido no campo files.',
+      );
+    }
+
+    const nonXmlFile = validFiles.find((file) => {
+      const fileName = String(file.originalname || '').trim().toLowerCase();
+      return !fileName.endsWith('.xml');
+    });
+
+    if (nonXmlFile) {
+      throw new BadRequestException('Todos os arquivos enviados devem ser XML.');
+    }
+
+    return this.fuelRecordsService.previewXmlImport(
+      this.resolveCompanyIdFromUser(req),
+      validFiles,
+    );
+  }
+
+  @Post('xml/confirm')
+  confirmFuelXml(
+    @Body() dto: ConfirmFuelXmlPreviewDto,
+    @Req() req: any,
+  ) {
+    return this.fuelRecordsService.confirmXmlImport(
+      this.resolveCompanyIdFromUser(req),
+      dto,
+    );
   }
 
   @Get('imported-xml')

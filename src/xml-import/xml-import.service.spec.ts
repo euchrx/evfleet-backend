@@ -545,4 +545,122 @@ describe('XmlImportService', () => {
       }),
     );
   });
+
+  it('gera preview por item para abastecimentos com combustivel, arla e outros itens', async () => {
+    const prisma = {
+      fuelRecord: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: 'duplicated_item' })
+          .mockResolvedValueOnce(null),
+        findMany: jest.fn(async () => []),
+      },
+    };
+
+    const service = new XmlImportService(prisma as any);
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc>
+  <NFe>
+    <infNFe Id="NFe55555555555555555555555555555555555555555555">
+      <ide>
+        <nNF>321</nNF>
+        <serie>1</serie>
+        <dhEmi>2026-04-01T08:30:00-03:00</dhEmi>
+      </ide>
+      <emit>
+        <xNome>Posto Avenida</xNome>
+        <CNPJ>12345678000100</CNPJ>
+      </emit>
+      <infAdic>
+        <infCpl>PLACA: RHV4H87 KM: 123456</infCpl>
+      </infAdic>
+      <total>
+        <ICMSTot>
+          <vNF>742.50</vNF>
+        </ICMSTot>
+      </total>
+      <det nItem="1">
+        <prod>
+          <cProd>001</cProd>
+          <xProd>Diesel S10</xProd>
+          <qCom>100.0000</qCom>
+          <vUnCom>6.1500</vUnCom>
+          <vProd>615.00</vProd>
+        </prod>
+        <infAdProd>BICO 05 BOMBA 02 01/04/2026 08:15:00</infAdProd>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>002</cProd>
+          <xProd>ARLA 32</xProd>
+          <qCom>50.0000</qCom>
+          <vUnCom>2.5000</vUnCom>
+          <vProd>125.00</vProd>
+        </prod>
+      </det>
+      <det nItem="3">
+        <prod>
+          <cProd>003</cProd>
+          <xProd>Agua mineral</xProd>
+          <qCom>1.0000</qCom>
+          <vUnCom>2.5000</vUnCom>
+          <vProd>2.50</vProd>
+        </prod>
+      </det>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <chNFe>55555555555555555555555555555555555555555555</chNFe>
+      <cStat>100</cStat>
+    </infProt>
+  </protNFe>
+</nfeProc>`;
+
+    const preview = await service.previewFuelXmlFiles({
+      companyId: 'company_1',
+      files: [{ buffer: Buffer.from(xml, 'utf-8'), originalname: 'nfe.xml' }],
+    });
+
+    expect(preview.summary).toEqual({
+      totalInvoices: 1,
+      totalItems: 3,
+      importableItems: 1,
+      duplicateItems: 1,
+      otherItems: 1,
+    });
+    expect(preview.invoices[0]).toEqual(
+      expect.objectContaining({
+        invoiceKey: '55555555555555555555555555555555555555555555',
+        invoiceNumber: '321',
+        supplierName: 'Posto Avenida',
+        plate: 'RHV4H87',
+        odometer: 123456,
+      }),
+    );
+    expect(preview.invoices[0].items).toEqual([
+      expect.objectContaining({
+        lineIndex: 1,
+        detectedType: 'FUEL',
+        importable: true,
+        duplicate: false,
+        detectedFuelType: 'S10',
+        nozzleNumber: '05',
+        pumpNumber: '02',
+      }),
+      expect.objectContaining({
+        lineIndex: 2,
+        detectedType: 'ARLA',
+        importable: true,
+        duplicate: true,
+      }),
+      expect.objectContaining({
+        lineIndex: 3,
+        detectedType: 'OTHER',
+        importable: false,
+        duplicate: false,
+      }),
+    ]);
+  });
 });

@@ -38,6 +38,64 @@ type ImportXmlZipByDomainInput = ImportXmlZipInput & {
 
 type FuelImportPreviewInput = ImportXmlZipInput;
 
+type FuelXmlPreviewFileInput = {
+  buffer: Buffer;
+  originalname?: string;
+};
+
+type FuelXmlPreviewRequestInput = {
+  companyId: string;
+  files: FuelXmlPreviewFileInput[];
+};
+
+type FuelXmlDetectedType = 'FUEL' | 'ARLA' | 'OTHER';
+
+type FuelXmlItemDuplicateCheckInput = {
+  companyId: string;
+  invoiceKey: string;
+  invoiceNumber?: string;
+  lineIndex: number;
+  productCode?: string;
+  quantity?: number;
+  unitPrice?: number;
+  plate?: string;
+  fuelDateTime?: Date;
+};
+
+type FuelXmlItemDuplicateCheckResult = {
+  duplicate: boolean;
+  duplicateReason?: string;
+};
+
+type FuelXmlPreviewItem = {
+  lineIndex: number;
+  productCode?: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  detectedType: FuelXmlDetectedType;
+  importable: boolean;
+  duplicate: boolean;
+  duplicateReason?: string;
+  detectedFuelType?: string;
+  fuelDateTime?: string;
+  nozzleNumber?: string;
+  pumpNumber?: string;
+};
+
+type FuelXmlPreviewInvoice = {
+  fileName: string;
+  invoiceKey: string;
+  invoiceNumber?: string;
+  issuedAt?: string;
+  supplierName?: string;
+  supplierDocument?: string;
+  plate?: string;
+  odometer?: number;
+  items: FuelXmlPreviewItem[];
+};
+
 type ConfirmFuelImportItemInput = {
   invoiceKey: string;
   vehicleId?: string;
@@ -80,12 +138,22 @@ type ParsedXmlInvoice = {
   totalAmount?: number;
   protocolNumber?: string;
   invoiceStatus: XmlInvoiceStatus;
+  additionalInfo?: string;
+  plate?: string;
+  odometer?: number;
   items: Array<{
+    lineIndex: number;
     productCode?: string;
     description: string;
     quantity?: number;
     unitValue?: number;
     totalValue?: number;
+    additionalInfo?: string;
+    plate?: string;
+    odometer?: number;
+    fuelDateTime?: Date;
+    nozzleNumber?: string;
+    pumpNumber?: string;
   }>;
 };
 
@@ -101,6 +169,194 @@ export class XmlImportService {
   });
 
   constructor(private readonly prisma: PrismaService) {}
+
+  async previewFuelXmlFiles(input: FuelXmlPreviewRequestInput) {
+    const companyId = String(input.companyId || '').trim();
+    if (!companyId) {
+      throw new BadRequestException('companyId obrigatorio para preview do XML.');
+    }
+
+    const files = Array.isArray(input.files) ? input.files : [];
+    if (files.length === 0) {
+      throw new BadRequestException('Envie ao menos um arquivo XML.');
+    }
+
+    const invoices: FuelXmlPreviewInvoice[] = [];
+
+    for (const file of files) {
+      const rawXml = this.readXmlBuffer(file.buffer);
+      const parsedInvoice = this.parseNfeXml(rawXml);
+
+      const previewItems = await Promise.all(
+        parsedInvoice.items.map(async (item) => {
+          const classification = this.classifyFuelPreviewItem(
+            item.description,
+            item.productCode,
+          );
+
+          const duplicateCheck = await this.findFuelImportDuplicate({
+            companyId,
+            invoiceKey: parsedInvoice.invoiceKey,
+            invoiceNumber: parsedInvoice.number,
+            lineIndex: item.lineIndex,
+            productCode: item.productCode,
+            quantity: item.quantity,
+            unitPrice: item.unitValue,
+            plate: item.plate || parsedInvoice.plate,
+            fuelDateTime: item.fuelDateTime || parsedInvoice.issuedAt,
+          });
+
+          return {
+            lineIndex: item.lineIndex,
+            productCode: item.productCode,
+            productName: item.description,
+            quantity: item.quantity ?? 0,
+            unitPrice: item.unitValue ?? 0,
+            totalPrice: item.totalValue ?? 0,
+            detectedType: classification.detectedType,
+            importable: classification.importable,
+            duplicate: duplicateCheck.duplicate,
+            duplicateReason: duplicateCheck.duplicateReason,
+            detectedFuelType: classification.detectedFuelType,
+            fuelDateTime: (item.fuelDateTime || parsedInvoice.issuedAt)?.toISOString(),
+            nozzleNumber: item.nozzleNumber,
+            pumpNumber: item.pumpNumber,
+          } satisfies FuelXmlPreviewItem;
+        }),
+      );
+
+      invoices.push({
+        fileName: String(file.originalname || 'importacao.xml').trim() || 'importacao.xml',
+        invoiceKey: parsedInvoice.invoiceKey,
+        invoiceNumber: parsedInvoice.number,
+        issuedAt: parsedInvoice.issuedAt?.toISOString(),
+        supplierName: parsedInvoice.issuerName,
+        supplierDocument: parsedInvoice.issuerDocument,
+        plate: parsedInvoice.plate,
+        odometer: parsedInvoice.odometer,
+        items: previewItems,
+      });
+    }
+
+    const allItems = invoices.flatMap((invoice) => invoice.items);
+
+    return {
+      summary: {
+        totalInvoices: invoices.length,
+        totalItems: allItems.length,
+        importableItems: allItems.filter(
+          (item) => item.importable && !item.duplicate,
+        ).length,
+        duplicateItems: allItems.filter((item) => item.duplicate).length,
+        otherItems: allItems.filter((item) => item.detectedType === 'OTHER').length,
+      },
+      invoices,
+    };
+  }
+
+  async findFuelImportDuplicate(
+    input: FuelXmlItemDuplicateCheckInput,
+  ): Promise<FuelXmlItemDuplicateCheckResult> {
+    const companyId = String(input.companyId || '').trim();
+    const invoiceKey = String(input.invoiceKey || '').trim();
+    const productCode = this.toText(input.productCode);
+    const invoiceNumber = this.toText(input.invoiceNumber);
+    const normalizedPlate = this.normalizePlate(input.plate);
+
+    if (!companyId || !invoiceKey || !input.lineIndex) {
+      return { duplicate: false };
+    }
+
+    if (productCode) {
+      const primaryDuplicate = await this.prisma.fuelRecord.findFirst({
+        where: {
+          sourceInvoiceKey: invoiceKey,
+          sourceInvoiceLineIndex: input.lineIndex,
+          sourceProductCode: productCode,
+          vehicle: { is: { companyId } },
+        },
+        select: { id: true },
+      });
+
+      if (primaryDuplicate) {
+        return {
+          duplicate: true,
+          duplicateReason: 'Item ja importado por chave da nota, linha e codigo do produto.',
+        };
+      }
+    }
+
+    const candidates = await this.prisma.fuelRecord.findMany({
+      where: {
+        OR: [
+          { sourceInvoiceKey: invoiceKey },
+          ...(invoiceNumber ? [{ invoiceNumber }] : []),
+          ...(normalizedPlate
+            ? [
+                { sourcePlate: normalizedPlate },
+                { vehicle: { is: { companyId, plate: normalizedPlate } } },
+              ]
+            : [{ vehicle: { is: { companyId } } }]),
+        ],
+      },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        liters: true,
+        totalValue: true,
+        fuelDate: true,
+        sourceInvoiceKey: true,
+        sourceInvoiceLineIndex: true,
+        sourceProductCode: true,
+        sourcePlate: true,
+        sourceFuelDateTime: true,
+        vehicle: {
+          select: {
+            plate: true,
+            companyId: true,
+          },
+        },
+      },
+      take: 50,
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const duplicate = candidates.find((candidate) => {
+      if (candidate.vehicle?.companyId !== companyId) return false;
+
+      const sameInvoice =
+        String(candidate.sourceInvoiceKey || '').trim() === invoiceKey ||
+        String(candidate.invoiceNumber || '').trim() === String(invoiceNumber || '').trim();
+      if (!sameInvoice) return false;
+
+      const samePlate =
+        !normalizedPlate ||
+        this.normalizePlate(candidate.sourcePlate || candidate.vehicle?.plate) ===
+          normalizedPlate;
+
+      const sameQuantity = this.areCloseNumbers(candidate.liters, input.quantity);
+      const sameUnitPrice = this.areCloseNumbers(
+        candidate.liters > 0 ? candidate.totalValue / candidate.liters : undefined,
+        input.unitPrice,
+      );
+      const sameFuelDateTime = this.areCloseDates(
+        candidate.sourceFuelDateTime || candidate.fuelDate,
+        input.fuelDateTime,
+      );
+
+      return samePlate && sameQuantity && sameUnitPrice && sameFuelDateTime;
+    });
+
+    if (duplicate) {
+      return {
+        duplicate: true,
+        duplicateReason:
+          'Item semelhante ja existe para a mesma nota considerando quantidade, valor, placa e horario.',
+      };
+    }
+
+    return { duplicate: false };
+  }
 
   async importZip(input: ImportXmlZipInput) {
     const companyId = String(input.companyId || '').trim();
@@ -1991,6 +2247,11 @@ export class XmlImportService {
     const emit = infNFe?.emit || {};
     const dest = infNFe?.dest || {};
     const icmsTot = infNFe?.total?.ICMSTot || {};
+    const infAdic = infNFe?.infAdic || {};
+    const invoiceAdditionalInfo = [infAdic?.infCpl, infAdic?.infAdFisco]
+      .map((value) => this.toText(value))
+      .filter((value): value is string => Boolean(value))
+      .join(' ');
 
     const keyFromId = this.toInvoiceKey(infNFe?.Id);
     const keyFromProtocol = this.onlyDigits(infProt?.chNFe);
@@ -2001,16 +2262,59 @@ export class XmlImportService {
     }
 
     const itemsRaw = this.toArray(infNFe?.det);
+    const invoicePlate = this.extractPlateFromTexts([
+      invoiceAdditionalInfo,
+      infNFe?.transp?.veicTransp?.placa,
+    ]);
+    const invoiceOdometer = this.extractOdometerFromTexts([invoiceAdditionalInfo]);
+    const invoiceFuelDateTime = this.extractFuelDateTimeFromTexts([invoiceAdditionalInfo]);
+
     const items = itemsRaw
-      .map((det: any) => det?.prod)
       .filter(Boolean)
-      .map((prod: any) => ({
-        productCode: this.toText(prod?.cProd),
-        description: this.toText(prod?.xProd) || 'Item sem descricao',
-        quantity: this.toNumber(prod?.qCom),
-        unitValue: this.toNumber(prod?.vUnCom),
-        totalValue: this.toNumber(prod?.vProd),
-      }));
+      .map((det: any, index: number) => {
+        const prod = det?.prod || {};
+        const additionalInfo = [det?.infAdProd, prod?.xProd, invoiceAdditionalInfo]
+          .map((value) => this.toText(value))
+          .filter((value): value is string => Boolean(value))
+          .join(' ');
+
+        return {
+          lineIndex: this.toInt(det?.nItem) || index + 1,
+          productCode: this.toText(prod?.cProd),
+          description: this.toText(prod?.xProd) || 'Item sem descricao',
+          quantity: this.toNumber(prod?.qCom),
+          unitValue: this.toNumber(prod?.vUnCom),
+          totalValue: this.toNumber(prod?.vProd),
+          additionalInfo: additionalInfo || undefined,
+          plate:
+            this.extractPlateFromTexts([
+              det?.infAdProd,
+              prod?.xProd,
+              prod?.veicProd?.placa,
+              invoiceAdditionalInfo,
+            ]) || invoicePlate,
+          odometer:
+            this.extractOdometerFromTexts([
+              det?.infAdProd,
+              prod?.xProd,
+              invoiceAdditionalInfo,
+            ]) ?? invoiceOdometer,
+          fuelDateTime:
+            this.extractFuelDateTimeFromTexts([
+              det?.infAdProd,
+              prod?.xProd,
+              invoiceAdditionalInfo,
+            ]) || invoiceFuelDateTime || this.toDate(ide?.dhEmi || ide?.dEmi),
+          nozzleNumber: this.extractNamedNumber(
+            ['bico', 'nro bico', 'numero bico'],
+            [det?.infAdProd, prod?.xProd, invoiceAdditionalInfo],
+          ),
+          pumpNumber: this.extractNamedNumber(
+            ['bomba', 'nro bomba', 'numero bomba'],
+            [det?.infAdProd, prod?.xProd, invoiceAdditionalInfo],
+          ),
+        };
+      });
 
     return {
       invoiceKey,
@@ -2024,6 +2328,9 @@ export class XmlImportService {
       totalAmount: this.toNumber(icmsTot?.vNF),
       protocolNumber: this.toText(infProt?.nProt),
       invoiceStatus: this.mapInvoiceStatus(infProt?.cStat),
+      additionalInfo: invoiceAdditionalInfo || undefined,
+      plate: invoicePlate,
+      odometer: invoiceOdometer,
       items,
     };
   }
@@ -2121,6 +2428,200 @@ export class XmlImportService {
     return FuelType.GASOLINE;
   }
 
+  private classifyFuelPreviewItem(
+    description: unknown,
+    productCode: unknown,
+  ): { detectedType: FuelXmlDetectedType; importable: boolean; detectedFuelType?: string } {
+    const normalized = this.normalizeForClassification([
+      `${this.toText(productCode) || ''} ${this.toText(description) || ''}`,
+    ]);
+
+    if (normalized.includes('ARLA') && normalized.includes('32')) {
+      return {
+        detectedType: 'ARLA',
+        importable: true,
+        detectedFuelType: 'ARLA32',
+      };
+    }
+
+    if (normalized.includes('FLEX')) {
+      return {
+        detectedType: 'FUEL',
+        importable: true,
+        detectedFuelType: 'FLEX',
+      };
+    }
+
+    if (normalized.includes('GASOLINA')) {
+      return {
+        detectedType: 'FUEL',
+        importable: true,
+        detectedFuelType: 'GASOLINE',
+      };
+    }
+
+    if (normalized.includes('ETANOL') || normalized.includes('ALCOOL')) {
+      return {
+        detectedType: 'FUEL',
+        importable: true,
+        detectedFuelType: 'ETHANOL',
+      };
+    }
+
+    if (normalized.includes('S10')) {
+      return {
+        detectedType: 'FUEL',
+        importable: true,
+        detectedFuelType: 'S10',
+      };
+    }
+
+    if (normalized.includes('S500')) {
+      return {
+        detectedType: 'FUEL',
+        importable: true,
+        detectedFuelType: 'S500',
+      };
+    }
+
+    if (normalized.includes('DIESEL')) {
+      return {
+        detectedType: 'FUEL',
+        importable: true,
+        detectedFuelType: 'DIESEL',
+      };
+    }
+
+    return {
+      detectedType: 'OTHER',
+      importable: false,
+    };
+  }
+
+  private readXmlBuffer(buffer: Buffer): string {
+    if (!buffer?.length) {
+      throw new BadRequestException('Arquivo XML vazio ou invalido.');
+    }
+
+    const utf8 = buffer.toString('utf-8').trim();
+    if (utf8) return utf8;
+
+    const latin1 = buffer.toString('latin1').trim();
+    if (latin1) return latin1;
+
+    throw new BadRequestException('Nao foi possivel ler o conteudo do XML.');
+  }
+
+  private extractPlateFromTexts(values: unknown[]): string | undefined {
+    const text = values
+      .map((value) => this.toText(value))
+      .filter((value): value is string => Boolean(value))
+      .join(' ')
+      .toUpperCase();
+
+    if (!text) return undefined;
+
+    const match = text.match(/\b[A-Z]{3}[0-9][A-Z0-9][0-9]{2}\b/g)?.[0];
+    return match || undefined;
+  }
+
+  private extractOdometerFromTexts(values: unknown[]): number | undefined {
+    const text = values
+      .map((value) => this.toText(value))
+      .filter((value): value is string => Boolean(value))
+      .join(' ');
+
+    if (!text) return undefined;
+
+    const patterns = [
+      /(?:km|quilometragem|hodometro|odometro|odômetro)\D{0,10}([\d.]{1,15})/i,
+      /([\d.]{1,15})\s*km/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (!match?.[1]) continue;
+      const normalized = match[1].replace(/\./g, '');
+      const parsed = Number(normalized);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return parsed;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractFuelDateTimeFromTexts(values: unknown[]): Date | undefined {
+    const text = values
+      .map((value) => this.toText(value))
+      .filter((value): value is string => Boolean(value))
+      .join(' ');
+
+    if (!text) return undefined;
+
+    const iso = text.match(
+      /\b(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2})?(?:[-+]\d{2}:\d{2}|Z)?)\b/,
+    );
+    if (iso?.[1]) {
+      return this.toDate(iso[1]);
+    }
+
+    const br = text.match(
+      /\b(\d{2}\/\d{2}\/\d{4})(?:\s+(\d{2}:\d{2}(?::\d{2})?))?\b/,
+    );
+    if (br?.[1]) {
+      const [day, month, year] = br[1].split('/').map((value) => Number(value));
+      const [hour, minute, second] = String(br[2] || '00:00:00')
+        .split(':')
+        .map((value) => Number(value));
+      const parsed = new Date(
+        year,
+        month - 1,
+        day,
+        hour || 0,
+        minute || 0,
+        second || 0,
+        0,
+      );
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractNamedNumber(labels: string[], values: unknown[]): string | undefined {
+    const text = values
+      .map((value) => this.toText(value))
+      .filter((value): value is string => Boolean(value))
+      .join(' ');
+
+    if (!text) return undefined;
+
+    for (const label of labels) {
+      const pattern = new RegExp(`${label}\\D{0,10}(\\d{1,6})`, 'i');
+      const match = text.match(pattern);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+
+    return undefined;
+  }
+
+  private areCloseNumbers(left?: number | null, right?: number | null) {
+    if (left === undefined || left === null || right === undefined || right === null) {
+      return false;
+    }
+    return Math.abs(left - right) < 0.0001;
+  }
+
+  private areCloseDates(left?: Date | null, right?: Date | null) {
+    if (!left || !right) return false;
+    return Math.abs(left.getTime() - right.getTime()) <= 60_000;
+  }
+
   private decimalToNumber(value: unknown): number {
     const parsed = Number(value ?? 0);
     return Number.isFinite(parsed) ? parsed : 0;
@@ -2165,6 +2666,13 @@ export class XmlImportService {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
 
+  private toInt(value: unknown): number | undefined {
+    const parsed = this.toNumber(value);
+    if (parsed === undefined) return undefined;
+    const rounded = Math.trunc(parsed);
+    return Number.isFinite(rounded) ? rounded : undefined;
+  }
+
   private onlyDigits(value: unknown): string | undefined {
     const text = this.toText(value);
     if (!text) return undefined;
@@ -2177,6 +2685,13 @@ export class XmlImportService {
     if (!text) return undefined;
     const noPrefix = text.toUpperCase().startsWith('NFE') ? text.slice(3) : text;
     return this.onlyDigits(noPrefix);
+  }
+
+  private normalizePlate(value: unknown): string | undefined {
+    const text = this.toText(value);
+    if (!text) return undefined;
+    const normalized = text.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return normalized || undefined;
   }
 
   private getDomainDefinition(domain: XmlDomain): {
