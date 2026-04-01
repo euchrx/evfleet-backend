@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -23,23 +24,38 @@ export class UsersService {
     const passwordHash = await bcrypt.hash(data.password, 10);
     const companyId = await this.resolveCompanyId(data.role, data.companyId);
 
-    return this.prisma.user.create({
-      data: {
-        name: data.name,
-        email: data.email,
-        password: passwordHash,
-        role: data.role,
-        companyId,
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        createdAt: true,
-        companyId: true,
-      },
-    });
+    try {
+      return await this.prisma.user.create({
+        data: {
+          name: data.name,
+          email: data.email,
+          password: passwordHash,
+          role: data.role,
+          companyId,
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          createdAt: true,
+          companyId: true,
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2011' &&
+        data.role === 'ADMIN' &&
+        !companyId
+      ) {
+        throw new BadRequestException(
+          'O banco de dados deste ambiente ainda exige empresa para usuários ADMIN. Aplique a migration mais recente e tente novamente.',
+        );
+      }
+
+      throw error;
+    }
   }
 
   async findAll() {
