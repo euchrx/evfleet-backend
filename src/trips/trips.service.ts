@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,6 +10,8 @@ import { UpdateTripDto } from './dto/update-trip.dto';
 
 @Injectable()
 export class TripsService {
+  private readonly logger = new Logger(TripsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   private readonly includeRelations = {
@@ -19,6 +22,64 @@ export class TripsService {
     },
     driver: true,
   } as const;
+
+  private async hydrateTrips<
+    T extends {
+      id: string;
+      vehicleId: string;
+      driverId?: string | null;
+    },
+  >(trips: T[]) {
+    if (trips.length === 0) return [];
+
+    const vehicleIds = Array.from(new Set(trips.map((trip) => trip.vehicleId).filter(Boolean)));
+    const driverIds = Array.from(
+      new Set(
+        trips
+          .map((trip) => trip.driverId)
+          .filter((driverId): driverId is string => Boolean(driverId)),
+      ),
+    );
+
+    const [vehicles, drivers] = await Promise.all([
+      this.prisma.vehicle.findMany({
+        where: { id: { in: vehicleIds } },
+        include: { branch: true },
+      }),
+      driverIds.length
+        ? this.prisma.driver.findMany({
+            where: { id: { in: driverIds } },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const vehicleMap = new Map<string, (typeof vehicles)[number]>(
+      vehicles.map((vehicle) => [vehicle.id, vehicle] as const),
+    );
+    const driverMap = new Map<string, (typeof drivers)[number]>(
+      drivers.map((driver) => [driver.id, driver] as const),
+    );
+
+    const validTrips = trips
+      .map((trip) => {
+        const vehicle = vehicleMap.get(trip.vehicleId);
+        if (!vehicle) {
+          this.logger.warn(
+            `Viagem ${trip.id} ignorada porque o veiculo ${trip.vehicleId} nao foi encontrado no escopo atual.`,
+          );
+          return null;
+        }
+
+        return {
+          ...trip,
+          vehicle,
+          driver: trip.driverId ? driverMap.get(trip.driverId) ?? null : null,
+        };
+      })
+      .filter((trip): trip is NonNullable<typeof trip> => Boolean(trip));
+
+    return validTrips;
+  }
 
   async create(dto: CreateTripDto) {
     await this.ensureVehicleExists(dto.vehicleId);
@@ -45,19 +106,25 @@ export class TripsService {
   }
 
   async findAll() {
-    return (this.prisma as any).trip.findMany({
+    const trips = await (this.prisma as any).trip.findMany({
       orderBy: { departureAt: 'desc' },
-      include: this.includeRelations,
     });
+
+    return this.hydrateTrips(trips);
   }
 
   async findOne(id: string) {
     const trip = await (this.prisma as any).trip.findUnique({
       where: { id },
-      include: this.includeRelations,
     });
     if (!trip) throw new NotFoundException('Viagem nao encontrada');
-    return trip;
+
+    const [hydratedTrip] = await this.hydrateTrips([trip]);
+    if (!hydratedTrip) {
+      throw new NotFoundException('Viagem nao encontrada no escopo atual.');
+    }
+
+    return hydratedTrip;
   }
 
   async update(id: string, dto: UpdateTripDto) {
