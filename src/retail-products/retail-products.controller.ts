@@ -25,6 +25,7 @@ export class RetailProductsController {
     @Query('supplier') supplier?: string,
     @Query('invoiceNumber') invoiceNumber?: string,
     @Query('itemDescription') itemDescription?: string,
+    @Query('category') category?: string,
   ) {
     return this.xmlImportService.listRetailProductItems(
       this.resolveCompanyIdFromUser(req),
@@ -34,6 +35,7 @@ export class RetailProductsController {
         supplier,
         invoiceNumber,
         itemDescription,
+        category,
       },
     );
   }

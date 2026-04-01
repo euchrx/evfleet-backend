@@ -1288,13 +1288,14 @@ export class XmlImportService {
 
   async listRetailProductItems(
     companyId: string,
-    filters: ListRetailProductImportsFilters = {},
+    filters: ListRetailProductImportsFilters & { category?: string } = {},
   ) {
     const dateFrom = this.toDate(filters.dateFrom);
     const dateTo = this.toDate(filters.dateTo);
     const supplier = String(filters.supplier || '').trim();
     const invoiceNumber = String(filters.invoiceNumber || '').trim();
     const itemDescription = String(filters.itemDescription || '').trim();
+    const category = String((filters as { category?: string }).category || '').trim();
 
     const issuedAtFilter: { gte?: Date; lte?: Date } = {};
     if (dateFrom) {
@@ -1320,7 +1321,7 @@ export class XmlImportService {
       );
     }
 
-    return this.prisma.retailProductImportItem.findMany({
+    const items = await this.prisma.retailProductImportItem.findMany({
       where: {
         ...(itemDescription
           ? {
@@ -1378,6 +1379,20 @@ export class XmlImportService {
         },
       },
     });
+
+    const normalizedCategory = this.normalizeRetailProductCategory(category);
+
+    return items
+      .map((item) => ({
+        ...item,
+        category: this.inferRetailProductCategory(
+          item.description,
+          item.productCode,
+        ),
+      }))
+      .filter((item) =>
+        normalizedCategory ? item.category === normalizedCategory : true,
+      );
   }
 
   async getRetailProductImportById(companyId: string, retailImportId: string) {
@@ -2724,6 +2739,108 @@ export class XmlImportService {
       detectedType: 'OTHER',
       importable: false,
     };
+  }
+
+  private inferRetailProductCategory(
+    description: unknown,
+    productCode: unknown,
+  ) {
+    const normalized = this.normalizeForClassification([
+      `${this.toText(productCode) || ''} ${this.toText(description) || ''}`,
+    ]);
+
+    if (
+      this.includesRetailCategoryKeyword(normalized, [
+        'SHAMPOO',
+        'CONDICIONADOR',
+        'SABONETE',
+        'DESODORANTE',
+        'PERFUME',
+        'COLONIA',
+        'CREME DENTAL',
+        'ESCOVA DENTAL',
+        'HIGIENE',
+        'PERFUMARIA',
+      ])
+    ) {
+      return 'PERFUMARIA';
+    }
+
+    if (
+      this.includesRetailCategoryKeyword(normalized, [
+        'COSMETICO',
+        'MAQUIAGEM',
+        'HIDRATANTE',
+        'PROTETOR SOLAR',
+        'CREME',
+        'LOCAO',
+      ])
+    ) {
+      return 'COSMETICOS';
+    }
+
+    if (
+      this.includesRetailCategoryKeyword(normalized, [
+        'OLEO',
+        'LUBRIFICANTE',
+        'GRAXA',
+        'ADITIVO',
+        'FLUIDO',
+      ])
+    ) {
+      return 'LUBRIFICANTES';
+    }
+
+    if (
+      this.includesRetailCategoryKeyword(normalized, [
+        'REFRIGERANTE',
+        'BEBIDA',
+        'SALGADINHO',
+        'CHOCOLATE',
+        'BISCOITO',
+        'BALA',
+        'AGUA',
+        'SUCO',
+        'CAFE',
+        'CONVENIENCIA',
+      ])
+    ) {
+      return 'CONVENIENCIA';
+    }
+
+    if (
+      this.includesRetailCategoryKeyword(normalized, [
+        'LIMPEZA',
+        'LIMPADOR',
+        'PANO',
+        'ESPONJA',
+        'ODORIZANTE',
+        'AROMATIZANTE',
+      ])
+    ) {
+      return 'LIMPEZA';
+    }
+
+    return 'OUTROS';
+  }
+
+  private includesRetailCategoryKeyword(
+    normalizedText: string,
+    keywords: string[],
+  ) {
+    return keywords.some((keyword) => normalizedText.includes(keyword));
+  }
+
+  private normalizeRetailProductCategory(value?: string | null) {
+    const normalized = this.normalizeForClassification([String(value || '')]);
+    if (!normalized) return '';
+    if (normalized === 'COSMETICOS') return 'COSMETICOS';
+    if (normalized === 'PERFUMARIA') return 'PERFUMARIA';
+    if (normalized === 'LUBRIFICANTES') return 'LUBRIFICANTES';
+    if (normalized === 'CONVENIENCIA') return 'CONVENIENCIA';
+    if (normalized === 'LIMPEZA') return 'LIMPEZA';
+    if (normalized === 'OUTROS') return 'OUTROS';
+    return '';
   }
 
   private mapDetectedFuelTypeToRecordFuelType(detectedFuelType?: string) {
