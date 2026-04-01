@@ -25,9 +25,11 @@ export type CompanyDeletionSummary = {
 };
 
 export type CompanyDeletionBackupResult = {
+  identifier: string;
   fileName: string;
   filePath: string;
   generatedAt: string;
+  metadataDownloadAvailable: boolean;
 };
 
 export type CompanyDeletionResponse<T> = {

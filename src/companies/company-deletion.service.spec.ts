@@ -90,6 +90,10 @@ describe('CompanyDeletionService', () => {
       deleteMany: createDeleteManyMock('webhookEvents', 1, order),
     },
     user: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'admin-1',
+        companyId: 'company-1',
+      }),
       deleteMany: createDeleteManyMock('users', 3, order),
     },
     auditLog: {
@@ -117,9 +121,11 @@ describe('CompanyDeletionService', () => {
       createBackupWithClient: jest.fn().mockImplementation(async () => {
         deleteOrder.push('backup');
         return {
+          identifier: 'company-evfleet-2026-04-01.json',
           fileName: 'company-evfleet-2026-04-01.json',
           filePath: 'storage/backups/companies/company-evfleet-2026-04-01.json',
           generatedAt: '2026-04-01T10:00:00.000Z',
+          metadataDownloadAvailable: false,
         };
       }),
     };
@@ -210,10 +216,12 @@ describe('CompanyDeletionService', () => {
           name: 'EvFleet',
         },
         backup: {
+          identifier: 'company-evfleet-2026-04-01.json',
           fileName: 'company-evfleet-2026-04-01.json',
           filePath:
             'storage/backups/companies/company-evfleet-2026-04-01.json',
           generatedAt: '2026-04-01T10:00:00.000Z',
+          metadataDownloadAvailable: false,
         },
         deleted: {
           company: 1,
@@ -248,7 +256,7 @@ describe('CompanyDeletionService', () => {
         action: 'DELETE_COMPANY_WITH_BACKUP',
         entity: 'Company',
         entityId: 'company-1',
-        performedByUserId: 'admin-1',
+        performedByUserId: null,
         metadata: expect.objectContaining({
           companyName: 'EvFleet',
           companySlug: 'evfleet',
@@ -262,6 +270,7 @@ describe('CompanyDeletionService', () => {
           }),
           outcome: 'SUCCESS',
           executedAt: expect.any(String),
+          performedByUserIdSnapshot: 'admin-1',
         }),
         client: expect.any(Object),
       }),

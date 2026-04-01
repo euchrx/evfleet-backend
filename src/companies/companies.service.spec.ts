@@ -150,9 +150,11 @@ describe('CompaniesService', () => {
           name: 'EvFleet',
         },
         backup: {
+          identifier: 'company-evfleet.json',
           fileName: 'company-evfleet.json',
           filePath: 'storage/backups/companies/company-evfleet.json',
           generatedAt: '2026-04-01T12:00:00.000Z',
+          metadataDownloadAvailable: false,
         },
         deleted: {
           company: 1,
@@ -216,9 +218,11 @@ describe('CompaniesService', () => {
           name: 'EvFleet',
         },
         backup: {
+          identifier: 'company-evfleet.json',
           fileName: 'company-evfleet.json',
           filePath: 'storage/backups/companies/company-evfleet.json',
           generatedAt: '2026-04-01T12:00:00.000Z',
+          metadataDownloadAvailable: false,
         },
         deleted: {
           company: 1,

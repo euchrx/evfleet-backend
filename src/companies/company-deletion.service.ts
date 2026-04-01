@@ -92,6 +92,11 @@ export class CompanyDeletionService {
           }
 
           let backup: CompanyDeletionBackupResult;
+          const auditActorUserId = await this.resolveAuditActorUserId(
+            tx,
+            actorUserId,
+            existingCompany.id,
+          );
 
           try {
             backup = await this.companyBackupService.createBackupWithClient(
@@ -115,7 +120,7 @@ export class CompanyDeletionService {
             action: CompanyDeletionService.AUDIT_ACTION,
             entity: 'Company',
             entityId: existingCompany.id,
-            performedByUserId: actorUserId,
+            performedByUserId: auditActorUserId,
             metadata: {
               companyName: existingCompany.name,
               companySlug: existingCompany.slug || null,
@@ -124,6 +129,7 @@ export class CompanyDeletionService {
               deletedSummary,
               executedAt: new Date().toISOString(),
               outcome: 'SUCCESS',
+              performedByUserIdSnapshot: actorUserId,
             },
             client: tx,
           });
@@ -215,9 +221,11 @@ export class CompanyDeletionService {
             name: metadata.companyName,
           },
           backup: {
+            identifier: metadata.backupFileName,
             fileName: metadata.backupFileName,
             filePath: metadata.backupFilePath,
             generatedAt: entry.createdAt.toISOString(),
+            metadataDownloadAvailable: false,
           },
           deleted: metadata.deletedSummary || this.emptyDeletionSummary(),
         },
@@ -239,6 +247,26 @@ export class CompanyDeletionService {
     `;
 
     return Boolean(rows?.[0]?.locked);
+  }
+
+  private async resolveAuditActorUserId(
+    tx: Prisma.TransactionClient,
+    actorUserId: string,
+    companyId: string,
+  ) {
+    const actor = await tx.user.findUnique({
+      where: { id: actorUserId },
+      select: {
+        id: true,
+        companyId: true,
+      },
+    });
+
+    if (!actor) {
+      return null;
+    }
+
+    return actor.companyId === companyId ? null : actor.id;
   }
 
   private async auditDeletionFailure(
@@ -263,6 +291,7 @@ export class CompanyDeletionService {
         outcome:
           errorCode === 'COMPANY_BACKUP_FAILED' ? 'BACKUP_FAILED' : 'FAILED',
         errorMessage: this.getErrorMessage(error),
+        performedByUserIdSnapshot: actorUserId,
       },
       swallowErrors: true,
     });

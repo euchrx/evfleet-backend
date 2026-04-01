@@ -296,9 +296,11 @@ export class CompanyBackupService {
     }
 
     return {
+      identifier: fileName,
       fileName,
       filePath: backupPath,
       generatedAt,
+      metadataDownloadAvailable: false,
     };
   }
 
