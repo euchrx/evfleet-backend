@@ -17,6 +17,27 @@ import { XmlImportService } from '../xml-import/xml-import.service';
 export class RetailProductsController {
   constructor(private readonly xmlImportService: XmlImportService) {}
 
+  @Get()
+  listItems(
+    @Req() req: any,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('supplier') supplier?: string,
+    @Query('invoiceNumber') invoiceNumber?: string,
+    @Query('itemDescription') itemDescription?: string,
+  ) {
+    return this.xmlImportService.listRetailProductItems(
+      this.resolveCompanyIdFromUser(req),
+      {
+        dateFrom,
+        dateTo,
+        supplier,
+        invoiceNumber,
+        itemDescription,
+      },
+    );
+  }
+
   @Post('import-xml')
   @UseInterceptors(FileInterceptor('file'))
   importXml(
@@ -70,4 +91,3 @@ export class RetailProductsController {
     return companyId;
   }
 }
-

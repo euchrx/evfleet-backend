@@ -1286,6 +1286,100 @@ export class XmlImportService {
     });
   }
 
+  async listRetailProductItems(
+    companyId: string,
+    filters: ListRetailProductImportsFilters = {},
+  ) {
+    const dateFrom = this.toDate(filters.dateFrom);
+    const dateTo = this.toDate(filters.dateTo);
+    const supplier = String(filters.supplier || '').trim();
+    const invoiceNumber = String(filters.invoiceNumber || '').trim();
+    const itemDescription = String(filters.itemDescription || '').trim();
+
+    const issuedAtFilter: { gte?: Date; lte?: Date } = {};
+    if (dateFrom) {
+      issuedAtFilter.gte = new Date(
+        dateFrom.getFullYear(),
+        dateFrom.getMonth(),
+        dateFrom.getDate(),
+        0,
+        0,
+        0,
+        0,
+      );
+    }
+    if (dateTo) {
+      issuedAtFilter.lte = new Date(
+        dateTo.getFullYear(),
+        dateTo.getMonth(),
+        dateTo.getDate(),
+        23,
+        59,
+        59,
+        999,
+      );
+    }
+
+    return this.prisma.retailProductImportItem.findMany({
+      where: {
+        ...(itemDescription
+          ? {
+              description: {
+                contains: itemDescription,
+                mode: 'insensitive',
+              },
+            }
+          : {}),
+        retailProductImport: {
+          companyId,
+          ...(Object.keys(issuedAtFilter).length > 0
+            ? { issuedAt: issuedAtFilter }
+            : {}),
+          ...(supplier
+            ? { supplierName: { contains: supplier, mode: 'insensitive' } }
+            : {}),
+          ...(invoiceNumber
+            ? { invoiceNumber: { contains: invoiceNumber, mode: 'insensitive' } }
+            : {}),
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }],
+      select: {
+        id: true,
+        productCode: true,
+        description: true,
+        quantity: true,
+        unitValue: true,
+        totalValue: true,
+        createdAt: true,
+        retailProductImport: {
+          select: {
+            id: true,
+            supplierName: true,
+            supplierDocument: true,
+            invoiceNumber: true,
+            invoiceSeries: true,
+            issuedAt: true,
+            totalAmount: true,
+            branch: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            xmlInvoice: {
+              select: {
+                id: true,
+                invoiceKey: true,
+                processingStatus: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
   async getRetailProductImportById(companyId: string, retailImportId: string) {
     const retailImport = await this.prisma.retailProductImport.findFirst({
       where: {
