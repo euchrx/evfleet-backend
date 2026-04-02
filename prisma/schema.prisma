@@ -123,6 +123,7 @@ enum VehicleCategory {
   CAR
   TRUCK
   UTILITY
+  IMPLEMENT
 }
 
 enum FuelType {

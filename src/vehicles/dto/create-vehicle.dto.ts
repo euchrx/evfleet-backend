@@ -21,12 +21,14 @@ export enum VehicleCategoryDto {
   CAR = 'CAR',
   TRUCK = 'TRUCK',
   UTILITY = 'UTILITY',
+  IMPLEMENT = 'IMPLEMENT',
 }
 
 export enum FuelTypeDto {
   GASOLINE = 'GASOLINE',
   ETHANOL = 'ETHANOL',
   DIESEL = 'DIESEL',
+  ARLA32 = 'ARLA32',
   FLEX = 'FLEX',
   ELECTRIC = 'ELECTRIC',
   HYBRID = 'HYBRID',

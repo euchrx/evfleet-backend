@@ -11,6 +11,8 @@ import { UpdateMaintenanceRecordDto } from './dto/update-maintenance-record.dto'
 export class MaintenanceRecordsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private readonly PENDING_STATUSES = new Set(['OPEN', 'PENDING']);
+
   private readonly includeVehicle = {
     vehicle: {
       include: {
@@ -21,28 +23,30 @@ export class MaintenanceRecordsService {
   } as const;
 
   async create(dto: CreateMaintenanceRecordDto) {
-    const prisma = this.prisma as any;
     await this.ensureVehicleExists(dto.vehicleId);
 
-    const created = await prisma.maintenanceRecord.create({
-      data: {
-        type: dto.type,
-        description: dto.description,
-        partsReplaced: dto.partsReplaced ?? [],
-        workshop: dto.workshop ?? null,
-        responsible: dto.responsible ?? null,
-        cost: dto.cost,
-        km: Math.round(dto.km),
-        maintenanceDate: new Date(dto.maintenanceDate),
-        status: dto.status,
-        notes: dto.notes ?? null,
-        vehicleId: dto.vehicleId,
-      },
-      include: this.includeVehicle,
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const created = await (tx as any).maintenanceRecord.create({
+        data: {
+          type: dto.type,
+          description: dto.description,
+          partsReplaced: dto.partsReplaced ?? [],
+          workshop: dto.workshop ?? null,
+          responsible: dto.responsible ?? null,
+          cost: dto.cost,
+          km: Math.round(dto.km),
+          maintenanceDate: new Date(dto.maintenanceDate),
+          status: dto.status,
+          notes: dto.notes ?? null,
+          vehicleId: dto.vehicleId,
+        },
+        include: this.includeVehicle,
+      });
 
-    await this.updateVehicleKm(created.vehicleId, created.km);
-    return created;
+      await this.updateVehicleKm(created.vehicleId, created.km, tx);
+      await this.syncVehicleStatusByMaintenance(created.vehicleId, tx);
+      return created;
+    });
   }
 
   async findAll() {
@@ -65,7 +69,6 @@ export class MaintenanceRecordsService {
   }
 
   async update(id: string, dto: UpdateMaintenanceRecordDto) {
-    const prisma = this.prisma as any;
     const previous = await this.findOne(id);
 
     if (!dto || Object.keys(dto).length === 0) {
@@ -76,43 +79,54 @@ export class MaintenanceRecordsService {
       await this.ensureVehicleExists(dto.vehicleId);
     }
 
-    const updated = await prisma.maintenanceRecord.update({
-      where: { id },
-      data: {
-        ...(dto.type !== undefined ? { type: dto.type } : {}),
-        ...(dto.description !== undefined ? { description: dto.description } : {}),
-        ...(dto.partsReplaced !== undefined
-          ? { partsReplaced: dto.partsReplaced }
-          : {}),
-        ...(dto.workshop !== undefined ? { workshop: dto.workshop } : {}),
-        ...(dto.responsible !== undefined ? { responsible: dto.responsible } : {}),
-        ...(dto.cost !== undefined ? { cost: dto.cost } : {}),
-        ...(dto.km !== undefined ? { km: Math.round(dto.km) } : {}),
-        ...(dto.maintenanceDate !== undefined
-          ? { maintenanceDate: new Date(dto.maintenanceDate) }
-          : {}),
-        ...(dto.status !== undefined ? { status: dto.status } : {}),
-        ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
-        ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
-      },
-      include: this.includeVehicle,
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await (tx as any).maintenanceRecord.update({
+        where: { id },
+        data: {
+          ...(dto.type !== undefined ? { type: dto.type } : {}),
+          ...(dto.description !== undefined ? { description: dto.description } : {}),
+          ...(dto.partsReplaced !== undefined
+            ? { partsReplaced: dto.partsReplaced }
+            : {}),
+          ...(dto.workshop !== undefined ? { workshop: dto.workshop } : {}),
+          ...(dto.responsible !== undefined ? { responsible: dto.responsible } : {}),
+          ...(dto.cost !== undefined ? { cost: dto.cost } : {}),
+          ...(dto.km !== undefined ? { km: Math.round(dto.km) } : {}),
+          ...(dto.maintenanceDate !== undefined
+            ? { maintenanceDate: new Date(dto.maintenanceDate) }
+            : {}),
+          ...(dto.status !== undefined ? { status: dto.status } : {}),
+          ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
+          ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
+        },
+        include: this.includeVehicle,
+      });
+
+      await this.updateVehicleKm(updated.vehicleId, updated.km, tx);
+      if (previous.vehicleId !== updated.vehicleId) {
+        await this.recalculateVehicleKm(previous.vehicleId, tx);
+      } else if (dto.km !== undefined && updated.km < previous.km) {
+        await this.recalculateVehicleKm(updated.vehicleId, tx);
+      }
+
+      await this.syncVehicleStatusByMaintenance(updated.vehicleId, tx);
+      if (previous.vehicleId !== updated.vehicleId) {
+        await this.syncVehicleStatusByMaintenance(previous.vehicleId, tx);
+      }
+
+      return updated;
     });
-
-    await this.updateVehicleKm(updated.vehicleId, updated.km);
-    if (previous.vehicleId !== updated.vehicleId) {
-      await this.recalculateVehicleKm(previous.vehicleId);
-    } else if (dto.km !== undefined && updated.km < previous.km) {
-      await this.recalculateVehicleKm(updated.vehicleId);
-    }
-
-    return updated;
   }
 
   async remove(id: string) {
-    const prisma = this.prisma as any;
     const record = await this.findOne(id);
-    await prisma.maintenanceRecord.delete({ where: { id } });
-    await this.recalculateVehicleKm(record.vehicleId);
+
+    await this.prisma.$transaction(async (tx) => {
+      await (tx as any).maintenanceRecord.delete({ where: { id } });
+      await this.recalculateVehicleKm(record.vehicleId, tx);
+      await this.syncVehicleStatusByMaintenance(record.vehicleId, tx);
+    });
+
     return { message: 'Manutencao removida com sucesso' };
   }
 
@@ -125,8 +139,12 @@ export class MaintenanceRecordsService {
     if (!exists) throw new NotFoundException('Veiculo nao encontrado');
   }
 
-  private async updateVehicleKm(vehicleId: string, km: number) {
-    const current = await this.prisma.vehicle.findUnique({
+  private async updateVehicleKm(
+    vehicleId: string,
+    km: number,
+    client: any = this.prisma,
+  ) {
+    const current = await client.vehicle.findUnique({
       where: { id: vehicleId },
       select: { currentKm: true },
     });
@@ -134,20 +152,23 @@ export class MaintenanceRecordsService {
     if (!current) return;
     if (km <= current.currentKm) return;
 
-    await this.prisma.vehicle.update({
+    await client.vehicle.update({
       where: { id: vehicleId },
       data: { currentKm: km },
     });
   }
 
-  private async recalculateVehicleKm(vehicleId: string) {
+  private async recalculateVehicleKm(
+    vehicleId: string,
+    client: any = this.prisma,
+  ) {
     const [lastFuel, lastMaintenance] = await Promise.all([
-      (this.prisma as any).fuelRecord.findFirst({
+      client.fuelRecord.findFirst({
         where: { vehicleId },
         orderBy: { km: 'desc' },
         select: { km: true },
       }),
-      (this.prisma as any).maintenanceRecord.findFirst({
+      client.maintenanceRecord.findFirst({
         where: { vehicleId },
         orderBy: { km: 'desc' },
         select: { km: true },
@@ -156,9 +177,49 @@ export class MaintenanceRecordsService {
 
     const nextKm = Math.max(lastFuel?.km ?? 0, lastMaintenance?.km ?? 0);
 
-    await this.prisma.vehicle.update({
+    await client.vehicle.update({
       where: { id: vehicleId },
       data: { currentKm: nextKm },
+    });
+  }
+
+  private normalizeMaintenanceStatus(value: string | null | undefined) {
+    return String(value || '')
+      .trim()
+      .toUpperCase();
+  }
+
+  private async syncVehicleStatusByMaintenance(
+    vehicleId: string,
+    client: any = this.prisma,
+  ) {
+    const [vehicle, pendingMaintenance] = await Promise.all([
+      client.vehicle.findUnique({
+        where: { id: vehicleId },
+        select: { id: true, status: true },
+      }),
+      client.maintenanceRecord.findFirst({
+        where: {
+          vehicleId,
+          status: {
+            in: [...this.PENDING_STATUSES],
+          },
+        },
+        select: { id: true, status: true },
+      }),
+    ]);
+
+    if (!vehicle) return;
+    if (vehicle.status === 'SOLD') return;
+
+    const hasPendingMaintenance = !!pendingMaintenance;
+
+    const nextStatus = hasPendingMaintenance ? 'MAINTENANCE' : 'ACTIVE';
+    if (vehicle.status === nextStatus) return;
+
+    await client.vehicle.update({
+      where: { id: vehicleId },
+      data: { status: nextStatus },
     });
   }
 }
