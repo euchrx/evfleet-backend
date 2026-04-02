@@ -308,13 +308,9 @@ export class BillingService {
   async createSubscriptionForCompany(
     companyId: string,
     planId: string,
-    initialStatus: CompanySubscriptionInitialStatus = 'TRIALING',
+    initialStatus?: CompanySubscriptionInitialStatus,
   ) {
     const now = new Date();
-    const currentPeriodEnd =
-      initialStatus === 'ACTIVE'
-        ? this.computePeriodEnd(now, PlanInterval.MONTHLY)
-        : this.addDays(now, 30);
 
     return this.prisma.$transaction(async (tx) => {
       const company = await tx.company.findUnique({
@@ -340,7 +336,7 @@ export class BillingService {
 
       const plan = await tx.plan.findUnique({
         where: { id: planId },
-        select: { id: true, isActive: true, interval: true },
+        select: { id: true, code: true, name: true, isActive: true, interval: true },
       });
       if (!plan) {
         throw new NotFoundException('Plano não encontrado.');
@@ -348,6 +344,19 @@ export class BillingService {
       if (!plan.isActive) {
         throw new BadRequestException('Plano inativo não pode ser utilizado.');
       }
+
+      const resolvedInitialStatus = await this.resolveSubscriptionInitialStatus(
+        tx,
+        companyId,
+        plan,
+        initialStatus,
+        existing?.id,
+        now,
+      );
+      const nextPeriodEnd =
+        resolvedInitialStatus === 'ACTIVE'
+          ? this.computePeriodEnd(now, plan.interval)
+          : this.addDays(now, 30);
 
       if (existing) {
         if (existing.planId === plan.id) {
@@ -358,16 +367,13 @@ export class BillingService {
           where: { id: existing.id },
           data: {
             planId: plan.id,
-            status: initialStatus,
+            status: resolvedInitialStatus,
+            startedAt: now,
+            trialEndsAt:
+              resolvedInitialStatus === 'TRIALING' ? nextPeriodEnd : null,
             currentPeriodStart: now,
-            currentPeriodEnd:
-              initialStatus === 'ACTIVE'
-                ? this.computePeriodEnd(now, existing.plan.interval)
-                : this.addDays(now, 30),
-            nextBillingAt:
-              initialStatus === 'ACTIVE'
-                ? this.computePeriodEnd(now, existing.plan.interval)
-                : this.addDays(now, 30),
+            currentPeriodEnd: nextPeriodEnd,
+            nextBillingAt: nextPeriodEnd,
           },
           include: { plan: true },
         });
@@ -377,16 +383,13 @@ export class BillingService {
         data: {
           companyId,
           planId: plan.id,
-          status: initialStatus,
+          status: resolvedInitialStatus,
+          startedAt: now,
+          trialEndsAt:
+            resolvedInitialStatus === 'TRIALING' ? nextPeriodEnd : null,
           currentPeriodStart: now,
-          currentPeriodEnd:
-            initialStatus === 'ACTIVE'
-              ? this.computePeriodEnd(now, plan.interval)
-              : currentPeriodEnd,
-          nextBillingAt:
-            initialStatus === 'ACTIVE'
-              ? this.computePeriodEnd(now, plan.interval)
-              : currentPeriodEnd,
+          currentPeriodEnd: nextPeriodEnd,
+          nextBillingAt: nextPeriodEnd,
         },
         include: { plan: true },
       });
@@ -1569,6 +1572,81 @@ export class BillingService {
         'webhook_url inválida para produção. Configure uma URL pública do backend.',
       );
     }
+  }
+
+  private async resolveSubscriptionInitialStatus(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    plan: {
+      id: string;
+      code?: string | null;
+      name?: string | null;
+      interval: PlanInterval;
+    },
+    requestedInitialStatus: CompanySubscriptionInitialStatus | undefined,
+    currentSubscriptionId: string | undefined,
+    now: Date,
+  ): Promise<CompanySubscriptionInitialStatus> {
+    if (requestedInitialStatus === 'ACTIVE') {
+      return 'ACTIVE';
+    }
+
+    const trialAllowed = await this.canStartTrialForPlan(
+      tx,
+      companyId,
+      plan,
+      currentSubscriptionId,
+      now,
+    );
+
+    if (requestedInitialStatus === 'TRIALING' && !trialAllowed) {
+      throw new BadRequestException(
+        'PerÃ­odo de teste disponÃ­vel apenas para o plano Starter na primeira contrataÃ§Ã£o. Para continuar, selecione o plano com pagamento.',
+      );
+    }
+
+    return trialAllowed ? 'TRIALING' : 'ACTIVE';
+  }
+
+  private async canStartTrialForPlan(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    plan: { code?: string | null; name?: string | null },
+    currentSubscriptionId: string | undefined,
+    now: Date,
+  ) {
+    if (!this.isStarterPlan(plan)) {
+      return false;
+    }
+
+    const previousTrials = await tx.subscription.findMany({
+      where: {
+        companyId,
+        trialEndsAt: { not: null },
+        ...(currentSubscriptionId ? { id: { not: currentSubscriptionId } } : {}),
+      },
+      select: {
+        id: true,
+        trialEndsAt: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (previousTrials.length === 0) {
+      return true;
+    }
+
+    return previousTrials.every((subscription) => {
+      if (!subscription.trialEndsAt) return false;
+      return subscription.trialEndsAt.getTime() > now.getTime();
+    });
+  }
+
+  private isStarterPlan(plan: { code?: string | null; name?: string | null }) {
+    const code = String(plan.code || '').trim().toUpperCase();
+    const name = String(plan.name || '').trim().toUpperCase();
+
+    return code === 'STA' || code === 'STARTER' || name.includes('STARTER');
   }
 
   private logWebhook(message: string, payload?: unknown, isError = false) {

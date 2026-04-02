@@ -25,9 +25,11 @@ describe('BillingLifecycleService', () => {
           companyId: 'company_1',
           planId: 'plan_1',
           status: 'ACTIVE',
+          startedAt: now,
           currentPeriodStart: now,
           currentPeriodEnd: now,
           nextBillingAt: now,
+          trialEndsAt: null,
           createdAt: now,
           updatedAt: now,
         },
@@ -61,5 +63,46 @@ describe('BillingLifecycleService', () => {
     expect(state.payments[0].status).toBe('EXPIRED');
     expect(state.subscriptions[0].status).toBe('PAST_DUE');
   });
-});
 
+  it('marca trial vencido como PAST_DUE mesmo sem payment pendente', async () => {
+    const now = new Date('2026-04-01T12:00:00.000Z');
+    const trialEndsAt = new Date('2026-03-31T12:00:00.000Z');
+
+    const { prisma, state } = createInMemoryBillingPrisma({
+      companies: [{ id: 'company_1', name: 'Empresa 1', active: true }],
+      plans: [
+        {
+          id: 'plan_sta',
+          code: 'STA',
+          name: 'Plano Starter',
+          priceCents: 39999,
+          currency: 'BRL',
+          interval: 'MONTHLY',
+          isActive: true,
+        },
+      ],
+      subscriptions: [
+        {
+          id: 'sub_trial',
+          companyId: 'company_1',
+          planId: 'plan_sta',
+          status: 'TRIALING',
+          startedAt: new Date('2026-03-16T12:00:00.000Z'),
+          currentPeriodStart: new Date('2026-03-16T12:00:00.000Z'),
+          currentPeriodEnd: trialEndsAt,
+          nextBillingAt: trialEndsAt,
+          trialEndsAt,
+          createdAt: new Date('2026-03-16T12:00:00.000Z'),
+          updatedAt: new Date('2026-03-16T12:00:00.000Z'),
+        },
+      ],
+    });
+
+    const service = new BillingLifecycleService(prisma as any);
+    const result = await service.processOverduePayments(now);
+
+    expect(result.expiredPayments).toBe(0);
+    expect(result.subscriptionsPastDue).toBe(1);
+    expect(state.subscriptions[0].status).toBe('PAST_DUE');
+  });
+});

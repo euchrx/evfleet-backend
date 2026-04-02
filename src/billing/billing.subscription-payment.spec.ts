@@ -10,9 +10,18 @@ describe('BillingService Subscription + Payment', () => {
       plans: [
         {
           id: 'plan_1',
-          code: 'basic',
-          name: 'Plano Basico',
+          code: 'STA',
+          name: 'Plano Starter',
           priceCents: 9900,
+          currency: 'BRL',
+          interval: 'MONTHLY',
+          isActive: true,
+        },
+        {
+          id: 'plan_2',
+          code: 'PRO',
+          name: 'Plano Pro',
+          priceCents: 19900,
           currency: 'BRL',
           interval: 'MONTHLY',
           isActive: true,
@@ -48,6 +57,67 @@ describe('BillingService Subscription + Payment', () => {
     expect(second.companyId).toBe('company_1');
     expect(second.planId).toBe('plan_1');
     expect(state.subscriptions).toHaveLength(1);
+  });
+
+  it('cria assinatura ativa por padrao para plano que nao e Starter', async () => {
+    const { service } = createService();
+
+    const created = await service.createSubscriptionForCompany('company_1', 'plan_2');
+
+    expect(created.planId).toBe('plan_2');
+    expect(created.status).toBe('ACTIVE');
+    expect(created.trialEndsAt).toBeNull();
+  });
+
+  it('bloqueia trial explicito para plano que nao e Starter', async () => {
+    const { service } = createService();
+
+    await expect(
+      service.createSubscriptionForCompany('company_1', 'plan_2', 'TRIALING'),
+    ).rejects.toThrow('Per');
+  });
+
+  it('bloqueia novo trial apos o encerramento do trial inicial', async () => {
+    const endedTrial = new Date('2026-03-31T12:00:00.000Z');
+    const { prisma } = createInMemoryBillingPrisma({
+      companies: [{ id: 'company_1', name: 'Empresa 1', active: true }],
+      plans: [
+        {
+          id: 'plan_1',
+          code: 'STA',
+          name: 'Plano Starter',
+          priceCents: 9900,
+          currency: 'BRL',
+          interval: 'MONTHLY',
+          isActive: true,
+        },
+      ],
+      subscriptions: [
+        {
+          id: 'sub_old_trial',
+          companyId: 'company_1',
+          planId: 'plan_1',
+          status: 'PAST_DUE',
+          startedAt: new Date('2026-03-16T12:00:00.000Z'),
+          currentPeriodStart: new Date('2026-03-16T12:00:00.000Z'),
+          currentPeriodEnd: endedTrial,
+          nextBillingAt: endedTrial,
+          trialEndsAt: endedTrial,
+          createdAt: new Date('2026-03-16T12:00:00.000Z'),
+          updatedAt: endedTrial,
+        },
+      ],
+    });
+
+    const gateway = {
+      createCheckoutLink: jest.fn(),
+    } as unknown as InfinitePayGateway;
+
+    const service = new BillingService(prisma as any, gateway);
+
+    await expect(
+      service.createSubscriptionForCompany('company_1', 'plan_1', 'TRIALING'),
+    ).rejects.toThrow('Per');
   });
 
   it('cria payment inicial com valor do plano e dados de checkout', async () => {

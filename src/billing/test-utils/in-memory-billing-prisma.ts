@@ -19,9 +19,11 @@ type Subscription = {
   companyId: string;
   planId: string;
   status: string;
+  startedAt: Date | null;
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
   nextBillingAt: Date | null;
+  trialEndsAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -168,15 +170,45 @@ export function createInMemoryBillingPrisma(initial?: Partial<BillingState>) {
           companyId: data.companyId,
           planId: data.planId,
           status: data.status,
+          startedAt: data.startedAt || null,
           currentPeriodStart: data.currentPeriodStart || null,
           currentPeriodEnd: data.currentPeriodEnd || null,
           nextBillingAt: data.nextBillingAt || null,
+          trialEndsAt: data.trialEndsAt || null,
           createdAt: now,
           updatedAt: now,
         };
         state.subscriptions.push(created);
         if (args?.include?.plan) return withPlan(created);
         return created;
+      }),
+      findMany: jest.fn(async (args: any) => {
+        const where = args?.where || {};
+        let list = [...state.subscriptions];
+        if (where.companyId) {
+          list = list.filter((item) => item.companyId === where.companyId);
+        }
+        if (where.trialEndsAt?.not === null) {
+          list = list.filter((item) => item.trialEndsAt !== null);
+        }
+        if (where.trialEndsAt?.lt) {
+          list = list.filter(
+            (item) => item.trialEndsAt && item.trialEndsAt < where.trialEndsAt.lt,
+          );
+        }
+        if (where.id?.not) {
+          list = list.filter((item) => item.id !== where.id.not);
+        }
+        if (args?.orderBy?.createdAt === 'asc') {
+          list.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+        }
+        if (args?.select?.id || args?.select?.trialEndsAt) {
+          return list.map((item) => ({
+            ...(args.select.id ? { id: item.id } : {}),
+            ...(args.select.trialEndsAt ? { trialEndsAt: item.trialEndsAt } : {}),
+          }));
+        }
+        return list;
       }),
       update: jest.fn(async (args: any) => {
         const id = args?.where?.id;
@@ -188,10 +220,15 @@ export function createInMemoryBillingPrisma(initial?: Partial<BillingState>) {
       updateMany: jest.fn(async (args: any) => {
         const ids: string[] = args?.where?.id?.in || [];
         const statuses: string[] = args?.where?.status?.in || [];
+        const exactStatus =
+          typeof args?.where?.status === 'string' ? args.where.status : undefined;
+        const trialEndsAtLt: Date | undefined = args?.where?.trialEndsAt?.lt;
         let count = 0;
         for (const item of state.subscriptions) {
           if (ids.length && !ids.includes(item.id)) continue;
           if (statuses.length && !statuses.includes(item.status)) continue;
+          if (exactStatus && item.status !== exactStatus) continue;
+          if (trialEndsAtLt && (!item.trialEndsAt || !(item.trialEndsAt < trialEndsAtLt))) continue;
           Object.assign(item, args.data, { updatedAt: nowDate() });
           count += 1;
         }

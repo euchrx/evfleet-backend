@@ -23,6 +23,16 @@ export class BillingLifecycleService {
   // Estrutura pronta para scheduler (@Cron) quando o módulo de agendamento for habilitado.
   async processOverduePayments(now = new Date()) {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const expiredTrialsResult = await tx.subscription.updateMany({
+        where: {
+          status: SubscriptionStatus.TRIALING,
+          trialEndsAt: { lt: now },
+        },
+        data: {
+          status: SubscriptionStatus.PAST_DUE,
+        },
+      });
+
       const expiredPaymentsResult = await tx.payment.updateMany({
         where: {
           status: PaymentStatus.PENDING,
@@ -59,9 +69,8 @@ export class BillingLifecycleService {
       return {
         skipped: false,
         expiredPayments: expiredPaymentsResult.count,
-        subscriptionsPastDue: pastDueResult.count,
+        subscriptionsPastDue: pastDueResult.count + expiredTrialsResult.count,
       };
     });
   }
 }
-

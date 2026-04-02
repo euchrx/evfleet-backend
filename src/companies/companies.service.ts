@@ -43,11 +43,13 @@ export class CompaniesService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const defaultPlan = await tx.plan.findFirst({
+        const activePlans = await tx.plan.findMany({
           where: { isActive: true },
           orderBy: [{ priceCents: 'asc' }, { createdAt: 'asc' }],
-          select: { id: true },
+          select: { id: true, code: true, name: true },
         });
+        const defaultPlan =
+          activePlans.find((plan) => this.isStarterPlan(plan)) || activePlans[0];
 
         if (!defaultPlan) {
           throw new BadRequestException(
@@ -364,6 +366,13 @@ export class CompaniesService {
     const result = new Date(date);
     result.setDate(result.getDate() + days);
     return result;
+  }
+
+  private isStarterPlan(plan: { code?: string | null; name?: string | null }) {
+    const code = String(plan.code || '').trim().toUpperCase();
+    const name = String(plan.name || '').trim().toUpperCase();
+
+    return code === 'STA' || code === 'STARTER' || name.includes('STARTER');
   }
 
   private buildBadRequestException(errorCode: string, message: string) {
