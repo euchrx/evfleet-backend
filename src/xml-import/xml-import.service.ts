@@ -153,6 +153,7 @@ type ProductXmlPreviewInvoice = {
   issuedAt?: string;
   supplierName?: string;
   supplierDocument?: string;
+  plate?: string;
   items: ProductXmlPreviewItem[];
 };
 
@@ -395,6 +396,7 @@ export class XmlImportService {
         issuedAt: parsedInvoice.issuedAt?.toISOString(),
         supplierName: parsedInvoice.issuerName,
         supplierDocument: parsedInvoice.issuerDocument,
+        plate: parsedInvoice.plate,
         items: filteredPreviewItems,
       });
     }
@@ -1572,12 +1574,21 @@ export class XmlImportService {
         retailProductImport: {
           select: {
             id: true,
+            sourcePlate: true,
             supplierName: true,
             supplierDocument: true,
             invoiceNumber: true,
             invoiceSeries: true,
             issuedAt: true,
             totalAmount: true,
+            vehicle: {
+              select: {
+                id: true,
+                plate: true,
+                brand: true,
+                model: true,
+              },
+            },
             branch: {
               select: {
                 id: true,
@@ -1589,6 +1600,7 @@ export class XmlImportService {
                 id: true,
                 invoiceKey: true,
                 processingStatus: true,
+                rawXml: true,
               },
             },
           },
@@ -1598,7 +1610,9 @@ export class XmlImportService {
 
     const normalizedCategory = this.normalizeRetailProductCategory(category);
 
-    return items
+    const enrichedItems = await this.attachRetailProductVehicles(companyId, items);
+
+    return enrichedItems
       .map((item) => ({
         ...item,
         category:
@@ -1608,6 +1622,111 @@ export class XmlImportService {
       .filter((item) =>
         normalizedCategory ? item.category === normalizedCategory : true,
       );
+  }
+
+  async deleteRetailProductItems(companyId: string, itemIds: string[]) {
+    const normalizedIds = Array.from(
+      new Set(
+        (Array.isArray(itemIds) ? itemIds : [])
+          .map((item) => String(item || '').trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (normalizedIds.length === 0) {
+      throw new BadRequestException(
+        'Informe ao menos um item para exclusão.',
+      );
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const items = await tx.retailProductImportItem.findMany({
+        where: {
+          id: { in: normalizedIds },
+          retailProductImport: {
+            companyId,
+          },
+        },
+        select: {
+          id: true,
+          retailProductImportId: true,
+        },
+      });
+
+      if (items.length === 0) {
+        throw new NotFoundException('Nenhum item de produto foi encontrado.');
+      }
+
+      if (items.length !== normalizedIds.length) {
+        throw new NotFoundException(
+          'Um ou mais itens selecionados não foram encontrados para a empresa atual.',
+        );
+      }
+
+      const affectedImportIds = Array.from(
+        new Set(items.map((item) => item.retailProductImportId)),
+      );
+
+      const deletedItems = await tx.retailProductImportItem.deleteMany({
+        where: {
+          id: { in: normalizedIds },
+          retailProductImport: {
+            companyId,
+          },
+        },
+      });
+
+      let deletedImports = 0;
+
+      if (affectedImportIds.length > 0) {
+        const emptyImports = await tx.retailProductImport.findMany({
+          where: {
+            id: { in: affectedImportIds },
+            companyId,
+            items: {
+              none: {},
+            },
+          },
+          select: {
+            id: true,
+            xmlInvoiceId: true,
+          },
+        });
+
+        if (emptyImports.length > 0) {
+          const emptyImportIds = emptyImports.map((item) => item.id);
+          const xmlInvoiceIds = emptyImports
+            .map((item) => item.xmlInvoiceId)
+            .filter((item): item is string => Boolean(item));
+
+          if (xmlInvoiceIds.length > 0) {
+            await tx.xmlInvoice.updateMany({
+              where: {
+                id: { in: xmlInvoiceIds },
+                linkedRetailProductImportId: { in: emptyImportIds },
+              },
+              data: {
+                linkedRetailProductImportId: null,
+              },
+            });
+          }
+
+          const deleted = await tx.retailProductImport.deleteMany({
+            where: {
+              id: { in: emptyImportIds },
+              companyId,
+            },
+          });
+
+          deletedImports = deleted.count;
+        }
+      }
+
+      return {
+        deletedItems: deletedItems.count,
+        deletedImports,
+      };
+    });
   }
 
   async confirmProductXmlPreview(
@@ -2136,6 +2255,8 @@ export class XmlImportService {
 
   async processInvoiceAsRetailProduct(companyId: string, invoiceId: string) {
     const invoice = await this.getProcessableInvoice(companyId, invoiceId);
+    const parsedInvoice = this.parseNfeXml(invoice.rawXml);
+    const normalizedPlate = this.normalizePlate(parsedInvoice.plate);
 
     if (invoice.processingType !== XmlProcessingType.RETAIL_PRODUCT) {
       throw new BadRequestException(
@@ -2144,11 +2265,26 @@ export class XmlImportService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      const resolvedVehicle = normalizedPlate
+        ? await tx.vehicle.findFirst({
+            where: {
+              companyId,
+              plate: normalizedPlate,
+            },
+            select: {
+              id: true,
+              branchId: true,
+            },
+          })
+        : null;
+
       const createdRetailImport = await tx.retailProductImport.create({
         data: {
           companyId,
-          branchId: invoice.branchId || null,
+          branchId: invoice.branchId || resolvedVehicle?.branchId || null,
           sourceInvoiceKey: invoice.invoiceKey,
+          sourcePlate: normalizedPlate || null,
+          vehicleId: resolvedVehicle?.id || null,
           xmlInvoiceId: invoice.id,
           supplierName: invoice.issuerName || null,
           supplierDocument: invoice.issuerDocument || null,
@@ -2463,6 +2599,7 @@ export class XmlImportService {
         issuerDocument: true,
         totalAmount: true,
         branchId: true,
+        rawXml: true,
         series: true,
         processingType: true,
         processingStatus: true,
@@ -3166,8 +3303,22 @@ export class XmlImportService {
       (acc, item) => acc + Number(item.totalPrice || 0),
       0,
     );
+    const normalizedPlate = this.normalizePlate(input.invoice.plate);
 
     return this.prisma.$transaction(async (tx) => {
+      const resolvedVehicle = normalizedPlate
+        ? await tx.vehicle.findFirst({
+            where: {
+              companyId: input.companyId,
+              plate: normalizedPlate,
+            },
+            select: {
+              id: true,
+              branchId: true,
+            },
+          })
+        : null;
+
       const existingImport = await tx.retailProductImport.findFirst({
         where: {
           companyId: input.companyId,
@@ -3176,6 +3327,7 @@ export class XmlImportService {
         select: {
           id: true,
           totalAmount: true,
+          branchId: true,
         },
       });
 
@@ -3186,6 +3338,9 @@ export class XmlImportService {
               totalAmount: new Prisma.Decimal(
                 this.decimalToNumber(existingImport.totalAmount) + totalAmount,
               ),
+              sourcePlate: normalizedPlate || null,
+              vehicleId: resolvedVehicle?.id || null,
+              branchId: existingImport.branchId || resolvedVehicle?.branchId || null,
             },
             select: { id: true },
           })
@@ -3201,6 +3356,9 @@ export class XmlImportService {
                 ? new Date(input.invoice.issuedAt)
                 : null,
               totalAmount: new Prisma.Decimal(totalAmount),
+              sourcePlate: normalizedPlate || null,
+              vehicleId: resolvedVehicle?.id || null,
+              branchId: resolvedVehicle?.branchId || null,
             },
             select: { id: true },
           });
@@ -3224,6 +3382,119 @@ export class XmlImportService {
       });
 
       return retailImport;
+    });
+  }
+
+  private async attachRetailProductVehicles(
+    companyId: string,
+    items: Array<{
+      id: string;
+      productCode: string | null;
+      description: string;
+      category: string | null;
+      quantity: Prisma.Decimal | null;
+      unitValue: Prisma.Decimal | null;
+      totalValue: Prisma.Decimal | null;
+      createdAt: Date;
+      retailProductImport: {
+        id: string;
+        sourcePlate: string | null;
+        supplierName: string | null;
+        supplierDocument: string | null;
+        invoiceNumber: string | null;
+        invoiceSeries: string | null;
+        issuedAt: Date | null;
+        totalAmount: Prisma.Decimal | null;
+        vehicle: {
+          id: string;
+          plate: string;
+          brand: string;
+          model: string;
+        } | null;
+        branch: {
+          id: string;
+          name: string;
+        } | null;
+        xmlInvoice: {
+          id: string;
+          invoiceKey: string;
+          processingStatus: string | null;
+          rawXml: string;
+        } | null;
+      };
+    }>,
+  ) {
+    const plateByImportId = new Map<string, string>();
+
+    for (const item of items) {
+      const importId = item.retailProductImport.id;
+      const persistedPlate = this.normalizePlate(item.retailProductImport.sourcePlate);
+      if (persistedPlate) {
+        plateByImportId.set(importId, persistedPlate);
+        continue;
+      }
+
+      const rawXml = item.retailProductImport.xmlInvoice?.rawXml;
+      if (!rawXml) continue;
+
+      try {
+        const parsedInvoice = this.parseNfeXml(rawXml);
+        const parsedPlate = this.normalizePlate(parsedInvoice.plate);
+        if (parsedPlate) {
+          plateByImportId.set(importId, parsedPlate);
+        }
+      } catch {
+        // Mantém o item sem vínculo quando o XML legado não puder ser lido.
+      }
+    }
+
+    const fallbackPlates = Array.from(new Set(plateByImportId.values()));
+    const vehiclesByPlate = new Map<
+      string,
+      { id: string; plate: string; brand: string; model: string }
+    >();
+
+    if (fallbackPlates.length > 0) {
+      const vehicles = await this.prisma.vehicle.findMany({
+        where: {
+          companyId,
+          plate: { in: fallbackPlates },
+        },
+        select: {
+          id: true,
+          plate: true,
+          brand: true,
+          model: true,
+        },
+      });
+
+      vehicles.forEach((vehicle) => {
+        const normalizedPlate = this.normalizePlate(vehicle.plate) || vehicle.plate;
+        vehiclesByPlate.set(normalizedPlate, vehicle);
+      });
+    }
+
+    return items.map((item) => {
+      const normalizedPlate = plateByImportId.get(item.retailProductImport.id);
+      const fallbackVehicle = normalizedPlate
+        ? vehiclesByPlate.get(normalizedPlate) || null
+        : null;
+
+      return {
+        ...item,
+        retailProductImport: {
+          ...item.retailProductImport,
+          sourcePlate: normalizedPlate || item.retailProductImport.sourcePlate,
+          vehicle: item.retailProductImport.vehicle || fallbackVehicle,
+          xmlInvoice: item.retailProductImport.xmlInvoice
+            ? {
+                id: item.retailProductImport.xmlInvoice.id,
+                invoiceKey: item.retailProductImport.xmlInvoice.invoiceKey,
+                processingStatus: item.retailProductImport.xmlInvoice.processingStatus,
+              }
+            : null,
+        },
+      };
     });
   }
 

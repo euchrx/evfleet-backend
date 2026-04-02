@@ -21,6 +21,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { ReportsModule } from './reports/reports.module';
 import { RetailProductsModule } from './retail-products/retail-products.module';
 import { SystemResetModule } from './system-reset/system-reset.module';
+import { SupportModule } from './support/support.module';
 import { TiresModule } from './tires/tires.module';
 import { TripsModule } from './trips/trips.module';
 import { UsersModule } from './users/users.module';
@@ -48,6 +49,7 @@ import { XmlImportModule } from './xml-import/xml-import.module';
     TiresModule,
     MenuVisibilityModule,
     SystemResetModule,
+    SupportModule,
     BillingModule,
     XmlImportModule,
     ConfigModule.forRoot({ isGlobal: true }),

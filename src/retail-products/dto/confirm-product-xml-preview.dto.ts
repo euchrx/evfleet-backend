@@ -89,6 +89,11 @@ class ConfirmProductXmlPreviewInvoiceDto {
   @Length(1, 20)
   supplierDocument?: string;
 
+  @IsOptional()
+  @IsString()
+  @Length(6, 12)
+  plate?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ConfirmProductXmlPreviewItemDto)

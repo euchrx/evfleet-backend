@@ -1,5 +1,6 @@
 import AdmZip from 'adm-zip';
 import {
+  Prisma,
   XmlImportBatchStatus,
   XmlProcessingStatus,
   XmlProcessingType,
@@ -101,6 +102,7 @@ function createValidNfeXml(params: {
   recipientDocument?: string;
   totalAmount?: string;
   protocolNumber?: string;
+  plate?: string;
   items?: Array<{
     productCode: string;
     description: string;
@@ -141,6 +143,11 @@ function createValidNfeXml(params: {
           <vNF>${params.totalAmount ?? '20.00'}</vNF>
         </ICMSTot>
       </total>
+      ${
+        params.plate
+          ? `<infAdic><infCpl>PLACA ${params.plate}</infCpl></infAdic>`
+          : ''
+      }
       ${items
         .map(
           (item, index) => `<det nItem="${index + 1}">
@@ -475,6 +482,9 @@ describe('XmlImportService', () => {
 
   it('processa nota RETAIL_PRODUCT e cria importacao de produtos de loja', async () => {
     const tx = {
+      vehicle: {
+        findFirst: jest.fn(async () => ({ id: 'vehicle_1', branchId: 'branch_1' })),
+      },
       retailProductImport: {
         create: jest.fn(async () => ({ id: 'retail_import_1' })),
       },
@@ -499,6 +509,21 @@ describe('XmlImportService', () => {
           issuerDocument: '12345678000100',
           totalAmount: 59.9,
           branchId: null,
+          rawXml: createValidNfeXml({
+            key: '99999999999999999999999999999999999999999999',
+            number: '99',
+            series: '1',
+            plate: 'RHV4H87',
+            items: [
+              {
+                code: 'CV01',
+                description: 'Refrigerante',
+                quantity: 2,
+                unitValue: 6.5,
+                totalValue: 13,
+              },
+            ],
+          }),
           processingType: XmlProcessingType.RETAIL_PRODUCT,
           processingStatus: XmlProcessingStatus.SUGGESTED,
           items: [
@@ -522,6 +547,9 @@ describe('XmlImportService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           companyId: 'company_1',
+          branchId: 'branch_1',
+          vehicleId: 'vehicle_1',
+          sourcePlate: 'RHV4H87',
           xmlInvoiceId: 'invoice_1',
           supplierName: 'Loja Conveniencia',
         }),
@@ -803,6 +831,9 @@ describe('XmlImportService', () => {
 
   it('confirma importacao de produtos por item e bloqueia duplicidade', async () => {
     const tx = {
+      vehicle: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'vehicle_1', branchId: 'branch_1' }),
+      },
       retailProductImport: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue({ id: 'retail_import_1' }),
@@ -832,6 +863,7 @@ describe('XmlImportService', () => {
           issuedAt: '2026-04-01T08:30:00.000Z',
           supplierName: 'Loja do Posto',
           supplierDocument: '12345678000100',
+          plate: 'RHV4H87',
           items: [
             {
               selected: true,
@@ -871,6 +903,9 @@ describe('XmlImportService', () => {
         data: expect.objectContaining({
           companyId: 'company_1',
           sourceInvoiceKey: '77777777777777777777777777777777777777777777',
+          sourcePlate: 'RHV4H87',
+          vehicleId: 'vehicle_1',
+          branchId: 'branch_1',
         }),
       }),
     );
@@ -892,5 +927,75 @@ describe('XmlImportService', () => {
       totalIgnored: 1,
       totalDuplicated: 0,
     });
+  });
+
+  it('lista produtos com veiculo resolvido pela placa salva ou pelo XML legado', async () => {
+    const prisma = {
+      retailProductImportItem: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'item_1',
+            productCode: 'PRD-1',
+            description: 'Shampoo automotivo',
+            category: 'PERFUMARIA',
+            quantity: new Prisma.Decimal(2),
+            unitValue: new Prisma.Decimal(15),
+            totalValue: new Prisma.Decimal(30),
+            createdAt: new Date('2026-04-01T10:00:00.000Z'),
+            retailProductImport: {
+              id: 'import_1',
+              sourcePlate: null,
+              supplierName: 'Loja do Posto',
+              supplierDocument: '12345678000100',
+              invoiceNumber: '777',
+              invoiceSeries: null,
+              issuedAt: new Date('2026-04-01T08:30:00.000Z'),
+              totalAmount: new Prisma.Decimal(30),
+              vehicle: null,
+              branch: null,
+              xmlInvoice: {
+                id: 'xml_1',
+                invoiceKey: '77777777777777777777777777777777777777777777',
+                processingStatus: 'PROCESSED',
+                rawXml: createValidNfeXml({
+                  key: '77777777777777777777777777777777777777777777',
+                  number: '777',
+                  plate: 'RHV4H87',
+                }),
+              },
+            },
+          },
+        ]),
+      },
+      vehicle: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'vehicle_1',
+            plate: 'RHV4H87',
+            brand: 'M BENZ',
+            model: 'ACTROS 2651',
+          },
+        ]),
+      },
+    };
+
+    const service = new XmlImportService(prisma as any);
+    const result = await service.listRetailProductItems('company_1');
+
+    expect(prisma.vehicle.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: 'company_1',
+          plate: { in: ['RHV4H87'] },
+        }),
+      }),
+    );
+    expect(result[0].retailProductImport.vehicle).toEqual({
+      id: 'vehicle_1',
+      plate: 'RHV4H87',
+      brand: 'M BENZ',
+      model: 'ACTROS 2651',
+    });
+    expect(result[0].retailProductImport.sourcePlate).toBe('RHV4H87');
   });
 });

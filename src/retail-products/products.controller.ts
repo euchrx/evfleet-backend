@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Post,
   Query,
@@ -11,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { ConfirmProductXmlPreviewDto } from './dto/confirm-product-xml-preview.dto';
+import { DeleteRetailProductItemsDto } from './dto/delete-retail-product-items.dto';
 import { XmlImportService } from '../xml-import/xml-import.service';
 
 @Controller('products')
@@ -82,6 +84,14 @@ export class ProductsController {
     return this.xmlImportService.confirmProductXmlPreview(
       this.resolveCompanyIdFromUser(req),
       dto,
+    );
+  }
+
+  @Delete()
+  deleteItems(@Body() dto: DeleteRetailProductItemsDto, @Req() req: any) {
+    return this.xmlImportService.deleteRetailProductItems(
+      this.resolveCompanyIdFromUser(req),
+      dto.itemIds,
     );
   }
 

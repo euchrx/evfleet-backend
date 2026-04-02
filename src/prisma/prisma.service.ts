@@ -70,6 +70,7 @@ export class PrismaService extends PrismaClient
       case 'User':
       case 'Subscription':
       case 'Payment':
+      case 'SupportRequest':
       case 'WebhookEvent':
         return { companyId };
       case 'Vehicle':

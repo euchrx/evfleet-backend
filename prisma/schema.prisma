@@ -32,6 +32,7 @@ model Company {
   xmlImportBatches XmlImportBatch[]
   xmlInvoices      XmlInvoice[]
   retailProductImports RetailProductImport[]
+  supportRequests SupportRequest[]
 
   @@index([active])
 }
@@ -90,6 +91,7 @@ model Vehicle {
   fuelRecords        FuelRecord[]
   trips              Trip[]
   documents          VehicleDocument[]
+  retailProductImports RetailProductImport[]
   tires              Tire[]
   tireReadings       TireReading[]
   changeLogs         VehicleChangeLog[]
@@ -168,6 +170,8 @@ model User {
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   auditLogs AuditLog[]
+  supportRequestsCreated SupportRequest[] @relation("SupportRequestCreatedBy")
+  supportRequestsResponded SupportRequest[] @relation("SupportRequestRespondedBy")
 
   @@index([companyId])
 }
@@ -475,6 +479,18 @@ enum WebhookProcessStatus {
   FAILED
 }
 
+enum SupportRequestCategory {
+  BUG
+  IMPROVEMENT
+  REQUEST
+}
+
+enum SupportRequestStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+}
+
 enum XmlImportBatchStatus {
   PENDING
   PROCESSING
@@ -701,24 +717,30 @@ model RetailProductImport {
   issuedAt         DateTime?
   totalAmount      Decimal? @db.Decimal(14, 2)
   sourceInvoiceKey String?
+  sourcePlate      String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
-
+  
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   branchId String?
   branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  
   xmlInvoiceId String?   
   xmlInvoice   XmlInvoice? @relation("RetailProductImportSource", fields: [xmlInvoiceId], references: [id], onDelete: Restrict)
-
+  
   items RetailProductImportItem[]
-
+  
   @@index([companyId])
   @@index([branchId])
+  @@index([vehicleId])
   @@index([issuedAt])
   @@index([sourceInvoiceKey])
+  @@index([sourcePlate])
 }
 
 model RetailProductImportItem {
@@ -740,4 +762,32 @@ model RetailProductImportItem {
   @@index([retailProductImportId])
   @@index([sourceInvoiceKey, sourceInvoiceLineIndex])
   @@unique([sourceInvoiceKey, sourceInvoiceLineIndex, sourceProductCode])
+}
+
+model SupportRequest {
+  id                    String                 @id @default(uuid())
+  title                 String
+  description           String
+  category              SupportRequestCategory @default(REQUEST)
+  status                SupportRequestStatus   @default(OPEN)
+  responseMessage       String?
+  estimatedCompletionAt DateTime?
+  respondedAt           DateTime?
+  completionMessage     String?
+  completedAt           DateTime?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdByUserId String?
+  createdByUser   User? @relation("SupportRequestCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  respondedByUserId String?
+  respondedByUser   User? @relation("SupportRequestRespondedBy", fields: [respondedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([status])
+  @@index([createdAt])
 }
