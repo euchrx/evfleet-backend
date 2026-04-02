@@ -20,6 +20,7 @@ import { BillingService } from './billing.service';
 import { CheckPaymentDto } from './dto/check-payment.dto';
 import { CreateCompanySubscriptionDto } from './dto/create-company-subscription.dto';
 import { CreatePlanDto } from './dto/create-plan.dto';
+import { CreateSubscriptionPaymentDto } from './dto/create-subscription-payment.dto';
 import { CreateSubscriptionCheckoutDto } from './dto/create-subscription-checkout.dto';
 import { UpdatePlanDto } from './dto/update-plan.dto';
 import { CreateCheckoutForSubscriptionUseCase } from './use-cases/create-checkout-for-subscription.use-case';
@@ -55,9 +56,9 @@ export class BillingController {
   }
 
   @Post('me/pay')
-  async payMyCompany(@Req() req: any) {
+  async payMyCompany(@Req() req: any, @Body() dto: CreateSubscriptionPaymentDto) {
     const companyId = this.requireAuthenticatedCompanyId(req);
-    return this.billingService.createInitialPaymentForCompany(companyId);
+    return this.billingService.createInitialPaymentForCompany(companyId, dto.planId);
   }
 
   @Post('me/subscription')
@@ -156,11 +157,13 @@ export class BillingController {
   @Post('subscriptions/:subscriptionId/pay')
   async createInitialPaymentForSubscription(
     @Param('subscriptionId') subscriptionId: string,
+    @Body() dto: CreateSubscriptionPaymentDto,
     @Req() req: any,
   ) {
     return this.createInitialPaymentForSubscriptionUseCase.execute(
       subscriptionId,
       req?.user?.companyId,
+      dto.planId,
     );
   }
 

@@ -172,6 +172,7 @@ model User {
   auditLogs AuditLog[]
   supportRequestsCreated SupportRequest[] @relation("SupportRequestCreatedBy")
   supportRequestsResponded SupportRequest[] @relation("SupportRequestRespondedBy")
+  supportRequestsCompleted SupportRequest[] @relation("SupportRequestCompletedBy")
 
   @@index([companyId])
 }
@@ -786,6 +787,9 @@ model SupportRequest {
 
   respondedByUserId String?
   respondedByUser   User? @relation("SupportRequestRespondedBy", fields: [respondedByUserId], references: [id], onDelete: SetNull)
+
+  completedByUserId String?
+  completedByUser   User? @relation("SupportRequestCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
 
   @@index([companyId])
   @@index([status])

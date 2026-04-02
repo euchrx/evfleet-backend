@@ -482,7 +482,11 @@ export class BillingService {
     };
   }
 
-  async createInitialPaymentForSubscription(subscriptionId: string, companyId?: string) {
+  async createInitialPaymentForSubscription(
+    subscriptionId: string,
+    companyId?: string,
+    targetPlanId?: string,
+  ) {
     const subscription = await this.prisma.subscription.findUnique({
       where: { id: subscriptionId },
       include: {
@@ -500,11 +504,37 @@ export class BillingService {
 
     await this.assertPaymentWindowOpenForSubscription(subscription);
 
-    const amountCents = Number(subscription.plan.priceCents || 0);
+    const targetPlan = targetPlanId
+      ? await this.prisma.plan.findUnique({
+          where: { id: targetPlanId },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            priceCents: true,
+            currency: true,
+            interval: true,
+            isActive: true,
+          },
+        })
+      : null;
+
+    if (targetPlanId && !targetPlan) {
+      throw new NotFoundException('Plano não encontrado.');
+    }
+
+    if (targetPlan && !targetPlan.isActive) {
+      throw new BadRequestException('Plano inativo não pode ser utilizado.');
+    }
+
+    const billingPlan = targetPlan || subscription.plan;
+    const amountCents = Number(billingPlan.priceCents || 0);
     this.validateMinimumAmountOrThrow(amountCents);
     const dueDate = subscription.nextBillingAt ?? this.addDays(new Date(), 30);
     const orderNsu = `initial_sub_${subscription.id}_${Date.now()}`;
-    const description = `Primeiro pagamento da assinatura ${subscription.plan.name}`;
+    const description = targetPlan
+      ? `Alteração para o plano ${billingPlan.name}`
+      : `Primeiro pagamento da assinatura ${billingPlan.name}`;
     const webhookUrl = this.resolveWebhookUrl();
     const redirectUrl = this.resolveRedirectUrl();
 
@@ -518,17 +548,24 @@ export class BillingService {
         gateway: BillingGateway.INFINITEPAY,
         status: PaymentStatus.PENDING,
         amountCents,
-        currency: subscription.plan.currency,
+        currency: billingPlan.currency,
         dueDate,
         companyId: subscription.companyId,
         subscriptionId: subscription.id,
         metadata: {
           provider: 'INFINITEPAY',
           type: 'INITIAL_SUBSCRIPTION_PAYMENT',
+          ...(targetPlan
+            ? {
+                requestedPlanId: targetPlan.id,
+                requestedPlanCode: targetPlan.code,
+                requestedPlanName: targetPlan.name,
+              }
+            : {}),
           order_nsu: orderNsu,
           request: {
             amountCents,
-            currency: subscription.plan.currency,
+            currency: billingPlan.currency,
             description,
             order_nsu: orderNsu,
           },
@@ -539,7 +576,7 @@ export class BillingService {
     try {
       const checkout = await this.infinitePayGateway.createCheckoutLink({
         amountCents,
-        currency: subscription.plan.currency,
+        currency: billingPlan.currency,
         description,
         orderNsu,
         redirectUrl,
@@ -592,7 +629,7 @@ export class BillingService {
     }
   }
 
-  async createInitialPaymentForCompany(companyId: string) {
+  async createInitialPaymentForCompany(companyId: string, targetPlanId?: string) {
     if (!companyId?.trim()) {
       throw new BadRequestException('companyId do usuário autenticado não informado.');
     }
@@ -607,7 +644,11 @@ export class BillingService {
       throw new NotFoundException('Nenhuma assinatura encontrada para a empresa autenticada.');
     }
 
-    return this.createInitialPaymentForSubscription(subscription.id, companyId);
+    return this.createInitialPaymentForSubscription(
+      subscription.id,
+      companyId,
+      targetPlanId,
+    );
   }
 
   async checkPaymentFallback(
@@ -734,11 +775,17 @@ export class BillingService {
         },
       });
 
+      const requestedPlan = await this.resolveRequestedPlanForPayment(
+        tx,
+        refreshed.metadata,
+        refreshed.subscription.plan,
+      );
       const periodStart = effectivePaidAt;
-      const periodEnd = this.computePeriodEnd(periodStart, refreshed.subscription.plan.interval);
+      const periodEnd = this.computePeriodEnd(periodStart, requestedPlan.interval);
       await tx.subscription.update({
         where: { id: refreshed.subscriptionId },
         data: {
+          planId: requestedPlan.id,
           status: SubscriptionStatus.ACTIVE,
           currentPeriodStart: periodStart,
           currentPeriodEnd: periodEnd,
@@ -983,14 +1030,20 @@ export class BillingService {
           },
         });
 
+        const requestedPlan = await this.resolveRequestedPlanForPayment(
+          tx,
+          payment.metadata,
+          updatedPayment.subscription.plan,
+        );
         const periodStart = normalized.periodStart ?? paidAt;
         const periodEnd =
           normalized.periodEnd ??
-          this.computePeriodEnd(periodStart, updatedPayment.subscription.plan.interval);
+          this.computePeriodEnd(periodStart, requestedPlan.interval);
 
         const updatedSubscription = await tx.subscription.update({
           where: { id: updatedPayment.subscriptionId },
           data: {
+            planId: requestedPlan.id,
             status: SubscriptionStatus.ACTIVE,
             currentPeriodStart: periodStart,
             currentPeriodEnd: periodEnd,
@@ -1647,6 +1700,47 @@ export class BillingService {
     const name = String(plan.name || '').trim().toUpperCase();
 
     return code === 'STA' || code === 'STARTER' || name.includes('STARTER');
+  }
+
+  private async resolveRequestedPlanForPayment(
+    tx: Prisma.TransactionClient,
+    metadata: Prisma.JsonValue | null,
+    fallbackPlan: {
+      id: string;
+      code?: string | null;
+      name?: string | null;
+      priceCents: number;
+      currency: string;
+      interval: PlanInterval;
+    },
+  ) {
+    const rawPlanId =
+      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? String((metadata as Record<string, unknown>).requestedPlanId || '').trim()
+        : '';
+
+    if (!rawPlanId) {
+      return fallbackPlan;
+    }
+
+    const requestedPlan = await tx.plan.findUnique({
+      where: { id: rawPlanId },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        priceCents: true,
+        currency: true,
+        interval: true,
+        isActive: true,
+      },
+    });
+
+    if (!requestedPlan || !requestedPlan.isActive) {
+      return fallbackPlan;
+    }
+
+    return requestedPlan;
   }
 
   private logWebhook(message: string, payload?: unknown, isError = false) {

@@ -4,11 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { SupportRequestCategory, SupportRequestStatus } from '@prisma/client';
+import { SupportRequestStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CompleteSupportRequestDto } from './dto/complete-support-request.dto';
 import { CreateSupportRequestDto } from './dto/create-support-request.dto';
 import { RespondSupportRequestDto } from './dto/respond-support-request.dto';
-import { CompleteSupportRequestDto } from './dto/complete-support-request.dto';
 
 type SupportContext = {
   userId?: string | null;
@@ -33,7 +33,7 @@ export class SupportService {
       await this.ensureStarterPlan(companyId as string);
     }
 
-    const requests = await this.prisma.supportRequest.findMany({
+    return this.prisma.supportRequest.findMany({
       where: {
         ...(isAdmin
           ? companyId
@@ -41,10 +41,7 @@ export class SupportService {
             : {}
           : { companyId: companyId as string }),
       },
-      orderBy: [
-        { status: 'asc' },
-        { createdAt: 'desc' },
-      ],
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       select: {
         id: true,
         title: true,
@@ -78,10 +75,15 @@ export class SupportService {
             email: true,
           },
         },
+        completedByUser: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
       },
     });
-
-    return requests;
   }
 
   async createRequest(context: SupportContext, dto: CreateSupportRequestDto) {
@@ -127,10 +129,7 @@ export class SupportService {
 
     const request = await this.prisma.supportRequest.findUnique({
       where: { id: requestId },
-      select: {
-        id: true,
-        status: true,
-      },
+      select: { id: true },
     });
 
     if (!request) {
@@ -167,9 +166,7 @@ export class SupportService {
 
     const request = await this.prisma.supportRequest.findUnique({
       where: { id: requestId },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     });
 
     if (!request) {
@@ -182,14 +179,62 @@ export class SupportService {
         status: SupportRequestStatus.COMPLETED,
         completionMessage: String(dto.completionMessage || '').trim() || null,
         completedAt: new Date(),
+        completedByUserId: this.normalizeId(context.userId) || null,
       },
       select: {
         id: true,
         status: true,
         completionMessage: true,
         completedAt: true,
+        completedByUser: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
       },
     });
+  }
+
+  async deleteRequest(requestId: string, context: SupportContext) {
+    const request = await this.prisma.supportRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        id: true,
+        companyId: true,
+        createdByUserId: true,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Pedido de suporte não encontrado.');
+    }
+
+    const isAdmin = this.isAdmin(context.role);
+    const userId = this.normalizeId(context.userId);
+    const companyId = this.resolveCompanyId(context);
+
+    if (!isAdmin) {
+      if (!companyId || companyId !== request.companyId) {
+        throw new ForbiddenException('Você não tem permissão para excluir este pedido.');
+      }
+
+      if (!userId || userId !== request.createdByUserId) {
+        throw new ForbiddenException('Você só pode excluir pedidos criados por você.');
+      }
+
+      await this.ensureStarterPlan(companyId);
+    }
+
+    await this.prisma.supportRequest.delete({
+      where: { id: request.id },
+    });
+
+    return {
+      success: true,
+      message: 'Pedido de suporte excluído com sucesso.',
+    };
   }
 
   private async ensureStarterPlan(companyId: string) {
@@ -208,7 +253,8 @@ export class SupportService {
 
     const code = String(subscription?.plan?.code || '').trim().toUpperCase();
     const name = String(subscription?.plan?.name || '').trim().toUpperCase();
-    const isStarter = code === 'STA' || code === 'STARTER' || name.includes('STARTER');
+    const isStarter =
+      code === 'STA' || code === 'STARTER' || name.includes('STARTER');
 
     if (!isStarter) {
       throw new ForbiddenException(
@@ -219,13 +265,17 @@ export class SupportService {
 
   private resolveCompanyId(context: SupportContext) {
     return (
-      this.normalizeId(context.companyScopeId) || this.normalizeId(context.companyId) || null
+      this.normalizeId(context.companyScopeId) ||
+      this.normalizeId(context.companyId) ||
+      null
     );
   }
 
   private ensureAdmin(role?: string | null) {
     if (!this.isAdmin(role)) {
-      throw new ForbiddenException('Apenas administradores podem responder pedidos de suporte.');
+      throw new ForbiddenException(
+        'Apenas administradores podem responder pedidos de suporte.',
+      );
     }
   }
 

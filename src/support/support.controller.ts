@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+} from '@nestjs/common';
 import { CompleteSupportRequestDto } from './dto/complete-support-request.dto';
 import { CreateSupportRequestDto } from './dto/create-support-request.dto';
 import { RespondSupportRequestDto } from './dto/respond-support-request.dto';
@@ -34,6 +43,11 @@ export class SupportController {
     @Body() dto: CompleteSupportRequestDto,
   ) {
     return this.supportService.completeRequest(id, this.buildContext(req), dto);
+  }
+
+  @Delete('requests/:id')
+  deleteRequest(@Param('id') id: string, @Req() req: any) {
+    return this.supportService.deleteRequest(id, this.buildContext(req));
   }
 
   private buildContext(req: any) {
