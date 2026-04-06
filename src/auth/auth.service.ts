@@ -49,6 +49,18 @@ export class AuthService {
     };
   }
 
+  async resolveLoginProfile(email: string) {
+    const user = await this.users.findByEmail(email);
+    const normalizedRole = String(user?.role || '').trim().toUpperCase();
+
+    return {
+      email,
+      userExists: Boolean(user),
+      role: normalizedRole || null,
+      isAdmin: normalizedRole === 'ADMIN',
+    };
+  }
+
   async reauthenticateAdmin(userId: string, password: string) {
     const normalizedUserId = String(userId || '').trim();
     const normalizedPassword = String(password || '');

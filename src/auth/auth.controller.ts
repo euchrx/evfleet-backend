@@ -10,6 +10,7 @@ import { UsersService } from '../users/users.service';
 import { AllowInadimplenteAccess } from './allow-inadimplente-access.decorator';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { ResolveLoginProfileDto } from './dto/resolve-login-profile.dto';
 import { Public } from './public.decorator';
 
 @Controller(['auth', 'api/auth'])
@@ -23,6 +24,12 @@ export class AuthController {
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.auth.login(dto.email, dto.password, dto.acceptedLegalTerms);
+  }
+
+  @Public()
+  @Post('login-profile')
+  resolveLoginProfile(@Body() dto: ResolveLoginProfileDto) {
+    return this.auth.resolveLoginProfile(dto.email);
   }
 
   @AllowInadimplenteAccess()
