@@ -5,13 +5,18 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class AuthService {
-  constructor(private users: UsersService, private jwt: JwtService) {}
+  constructor(
+    private users: UsersService,
+    private jwt: JwtService,
+    private prisma: PrismaService,
+  ) {}
 
-  async login(email: string, password: string) {
+  async login(email: string, password: string, acceptedLegalTerms = false) {
     const user = await this.users.findByEmail(email);
     if (!user) {
       throw new UnauthorizedException('Credenciais inválidas');
@@ -21,6 +26,8 @@ export class AuthService {
     if (!ok) {
       throw new UnauthorizedException('Credenciais inválidas');
     }
+
+    await this.ensureCompanyLegalAcceptance(user, acceptedLegalTerms);
 
     const payload = {
       userId: user.id,
@@ -75,5 +82,67 @@ export class AuthService {
       role: user.role,
       companyId: user.companyId,
     };
+  }
+
+  private async ensureCompanyLegalAcceptance(
+    user: {
+      id: string;
+      name: string;
+      role: string;
+      companyId?: string | null;
+    },
+    acceptedLegalTerms: boolean,
+  ) {
+    if (String(user.role || '').trim().toUpperCase() === 'ADMIN') {
+      return;
+    }
+
+    const companyId = String(user.companyId || '').trim();
+    if (!companyId) {
+      return;
+    }
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: {
+        id: true,
+        legalAcceptanceVersion: true,
+      },
+    });
+
+    if (!company) {
+      return;
+    }
+
+    const currentVersion = this.getCurrentLegalAcceptanceVersion();
+    if (company.legalAcceptanceVersion === currentVersion) {
+      return;
+    }
+
+    if (!acceptedLegalTerms) {
+      throw new ForbiddenException({
+        success: false,
+        errorCode: 'LEGAL_ACCEPTANCE_REQUIRED',
+        message:
+          'Para continuar, o responsável da empresa deve aceitar os termos de uso e a política de privacidade vigentes.',
+        data: {
+          currentVersion,
+        },
+      });
+    }
+
+    await this.prisma.company.update({
+      where: { id: companyId },
+      data: {
+        legalAcceptanceVersion: currentVersion,
+        legalAcceptedAt: new Date(),
+        legalAcceptedByUserId: user.id,
+        legalAcceptedByUserName: user.name,
+      },
+    });
+  }
+
+  private getCurrentLegalAcceptanceVersion() {
+    return process.env.LEGAL_ACCEPTANCE_VERSION?.trim() || '2026-04-06';
   }
 }

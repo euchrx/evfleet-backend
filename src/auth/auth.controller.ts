@@ -22,7 +22,7 @@ export class AuthController {
   @Public()
   @Post('login')
   login(@Body() dto: LoginDto) {
-    return this.auth.login(dto.email, dto.password);
+    return this.auth.login(dto.email, dto.password, dto.acceptedLegalTerms);
   }
 
   @AllowInadimplenteAccess()

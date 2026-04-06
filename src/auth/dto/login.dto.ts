@@ -1,4 +1,4 @@
-import { IsEmail, IsString, Length } from 'class-validator';
+import { IsBoolean, IsEmail, IsOptional, IsString, Length } from 'class-validator';
 
 export class LoginDto {
   @IsEmail()
@@ -7,4 +7,8 @@ export class LoginDto {
   @IsString()
   @Length(6, 100)
   password: string;
+
+  @IsOptional()
+  @IsBoolean()
+  acceptedLegalTerms?: boolean;
 }
