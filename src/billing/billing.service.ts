@@ -54,6 +54,9 @@ type CheckPaymentInput = {
 
 @Injectable()
 export class BillingService {
+  private readonly MANUAL_TRIAL_DAYS = 15;
+  private readonly MANUAL_ACTIVE_DAYS = 30;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly infinitePayGateway: InfinitePayGateway,
@@ -355,8 +358,8 @@ export class BillingService {
       );
       const nextPeriodEnd =
         resolvedInitialStatus === 'ACTIVE'
-          ? this.computePeriodEnd(now, plan.interval)
-          : this.addDays(now, 30);
+          ? this.addDays(now, this.MANUAL_ACTIVE_DAYS)
+          : this.addDays(now, this.MANUAL_TRIAL_DAYS);
 
       if (existing) {
         if (existing.planId === plan.id) {
