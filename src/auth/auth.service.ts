@@ -8,6 +8,8 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 
+const LEGAL_ACCEPTANCE_SETTING_KEY = 'legal_acceptance_settings';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -51,12 +53,14 @@ export class AuthService {
 
   async resolveLoginProfile(email: string) {
     const user = await this.users.findByEmail(email);
+    const legalAcceptanceEnabled = await this.isLegalAcceptanceEnabled();
     if (!user) {
       return {
         email,
         userExists: false,
         role: null,
         isAdmin: false,
+        legalAcceptanceEnabled,
         needsLegalAcceptance: false,
       };
     }
@@ -66,7 +70,7 @@ export class AuthService {
     const currentVersion = this.getCurrentLegalAcceptanceVersion();
     let needsLegalAcceptance = false;
 
-    if (normalizedRole !== 'ADMIN' && companyId) {
+    if (legalAcceptanceEnabled && normalizedRole !== 'ADMIN' && companyId) {
       const company = await this.prisma.company.findUnique({
         where: { id: companyId },
         select: {
@@ -83,6 +87,7 @@ export class AuthService {
       userExists: true,
       role: normalizedRole || null,
       isAdmin: normalizedRole === 'ADMIN',
+      legalAcceptanceEnabled,
       needsLegalAcceptance,
     };
   }
@@ -131,6 +136,10 @@ export class AuthService {
     },
     acceptedLegalTerms: boolean,
   ) {
+    if (!(await this.isLegalAcceptanceEnabled())) {
+      return;
+    }
+
     if (String(user.role || '').trim().toUpperCase() === 'ADMIN') {
       return;
     }
@@ -182,5 +191,22 @@ export class AuthService {
 
   private getCurrentLegalAcceptanceVersion() {
     return process.env.LEGAL_ACCEPTANCE_VERSION?.trim() || '2026-04-06';
+  }
+
+  private async isLegalAcceptanceEnabled() {
+    try {
+      const record = await this.prisma.systemSetting.findUnique({
+        where: { key: LEGAL_ACCEPTANCE_SETTING_KEY },
+        select: { value: true },
+      });
+
+      if (!record?.value || typeof record.value !== 'object') {
+        return false;
+      }
+
+      return (record.value as { enabled?: unknown }).enabled === true;
+    } catch {
+      return false;
+    }
   }
 }

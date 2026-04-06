@@ -22,6 +22,7 @@ import { ReportsModule } from './reports/reports.module';
 import { RetailProductsModule } from './retail-products/retail-products.module';
 import { SystemResetModule } from './system-reset/system-reset.module';
 import { SupportModule } from './support/support.module';
+import { SystemSettingsModule } from './system-settings/system-settings.module';
 import { TiresModule } from './tires/tires.module';
 import { TripsModule } from './trips/trips.module';
 import { UsersModule } from './users/users.module';
@@ -50,6 +51,7 @@ import { XmlImportModule } from './xml-import/xml-import.module';
     MenuVisibilityModule,
     SystemResetModule,
     SupportModule,
+    SystemSettingsModule,
     BillingModule,
     XmlImportModule,
     ConfigModule.forRoot({ isGlobal: true }),
