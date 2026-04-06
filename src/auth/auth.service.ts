@@ -51,13 +51,39 @@ export class AuthService {
 
   async resolveLoginProfile(email: string) {
     const user = await this.users.findByEmail(email);
+    if (!user) {
+      return {
+        email,
+        userExists: false,
+        role: null,
+        isAdmin: false,
+        needsLegalAcceptance: false,
+      };
+    }
+
     const normalizedRole = String(user?.role || '').trim().toUpperCase();
+    const companyId = String(user?.companyId || '').trim();
+    const currentVersion = this.getCurrentLegalAcceptanceVersion();
+    let needsLegalAcceptance = false;
+
+    if (normalizedRole !== 'ADMIN' && companyId) {
+      const company = await this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: {
+          legalAcceptanceVersion: true,
+        },
+      });
+
+      needsLegalAcceptance =
+        company?.legalAcceptanceVersion !== currentVersion;
+    }
 
     return {
       email,
-      userExists: Boolean(user),
+      userExists: true,
       role: normalizedRole || null,
       isAdmin: normalizedRole === 'ADMIN',
+      needsLegalAcceptance,
     };
   }
 
