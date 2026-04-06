@@ -194,6 +194,11 @@ export class UsersService {
         role: true,
         createdAt: true,
         companyId: true,
+        company: {
+          select: {
+            name: true,
+          },
+        },
       },
     });
   }
