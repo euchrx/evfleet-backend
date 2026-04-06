@@ -136,6 +136,31 @@ export class CompaniesService {
     return company;
   }
 
+  async findCurrentByUserId(userId: string) {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) {
+      return null;
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: normalizedUserId },
+      select: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+            document: true,
+            slug: true,
+            active: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    return user?.company || null;
+  }
+
   async update(id: string, dto: UpdateCompanyDto) {
     await this.findOne(id);
 

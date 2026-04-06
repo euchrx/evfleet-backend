@@ -32,10 +32,17 @@ export class CompaniesController {
   async findCurrent(@Req() req: any) {
     const role = String(req?.user?.role || '').trim().toUpperCase();
     const companyId = String(req?.user?.companyId || '').trim();
+    const userId = String(req?.user?.userId || req?.user?.id || '').trim();
 
-    // Superadmin pode operar sem empresa fixa
     if (!companyId && role === 'ADMIN') {
       return null;
+    }
+
+    if (!companyId && userId) {
+      const company = await this.companiesService.findCurrentByUserId(userId);
+      if (company) {
+        return company;
+      }
     }
 
     if (!companyId) {
@@ -52,7 +59,7 @@ export class CompaniesController {
           return null;
         }
         throw new UnauthorizedException(
-          'Empresa não encontrada para usuário autenticado',
+          'Empresa não encontrada para o usuário autenticado.',
         );
       }
       throw error;
