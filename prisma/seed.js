@@ -43,18 +43,34 @@ async function main() {
     throw new Error('MASTER_ADMIN_PASSWORD nao definido. Configure a variavel de ambiente com uma senha forte.');
   }
 
+  const existingAdmin = await prisma.user.findFirst({
+    where: { role: 'ADMIN' },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      companyId: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  if (existingAdmin) {
+    console.log('[seed] Admin already exists. Skipping master admin creation:', {
+      id: existingAdmin.id,
+      email: existingAdmin.email,
+      role: existingAdmin.role,
+      companyId: existingAdmin.companyId,
+    });
+    return;
+  }
+
   const password = await bcrypt.hash(plainPassword, 10);
   const companyId = await resolveCompanyId();
 
-  const user = await prisma.user.upsert({
-    where: { email },
-    update: {
-      name,
-      password,
-      role: 'ADMIN',
-      companyId,
-    },
-    create: {
+  const user = await prisma.user.create({
+    data: {
       name,
       email,
       password,
