@@ -1468,9 +1468,17 @@ export class BillingService {
 
   private async assertPaymentWindowOpenForSubscription(subscription: {
     id: string;
+    status?: SubscriptionStatus | null;
     currentPeriodStart?: Date | null;
     nextBillingAt?: Date | null;
   }) {
+    if (
+      subscription.status === SubscriptionStatus.CANCELED ||
+      subscription.status === SubscriptionStatus.PAST_DUE
+    ) {
+      return;
+    }
+
     const nextBillingAt = subscription.nextBillingAt
       ? new Date(subscription.nextBillingAt)
       : null;
