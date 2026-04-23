@@ -1,74 +1,74 @@
 -- CreateEnum
-CREATE TYPE "VehicleType" AS ENUM ('LIGHT', 'HEAVY');
+CREATE TYPE IF NOT EXISTS "VehicleType" AS ENUM ('LIGHT', 'HEAVY');
 
 -- CreateEnum
-CREATE TYPE "VehicleCategory" AS ENUM ('CAR', 'TRUCK', 'UTILITY', 'IMPLEMENT');
+CREATE TYPE IF NOT EXISTS "VehicleCategory" AS ENUM ('CAR', 'TRUCK', 'UTILITY', 'IMPLEMENT');
 
 -- CreateEnum
-CREATE TYPE "FuelType" AS ENUM ('GASOLINE', 'ETHANOL', 'DIESEL', 'ARLA32', 'FLEX', 'ELECTRIC', 'HYBRID', 'CNG');
+CREATE TYPE IF NOT EXISTS "FuelType" AS ENUM ('GASOLINE', 'ETHANOL', 'DIESEL', 'ARLA32', 'FLEX', 'ELECTRIC', 'HYBRID', 'CNG');
 
 -- CreateEnum
-CREATE TYPE "VehicleStatus" AS ENUM ('ACTIVE', 'MAINTENANCE', 'SOLD');
+CREATE TYPE IF NOT EXISTS "VehicleStatus" AS ENUM ('ACTIVE', 'MAINTENANCE', 'SOLD');
 
 -- CreateEnum
-CREATE TYPE "Role" AS ENUM ('ADMIN', 'FLEET_MANAGER', 'REGIONAL_MANAGER', 'BRANCH_MANAGER');
+CREATE TYPE IF NOT EXISTS "Role" AS ENUM ('ADMIN', 'FLEET_MANAGER', 'REGIONAL_MANAGER', 'BRANCH_MANAGER');
 
 -- CreateEnum
-CREATE TYPE "DebtCategory" AS ENUM ('FINE', 'IPVA', 'LICENSING', 'INSURANCE', 'TOLL', 'TAX', 'OTHER');
+CREATE TYPE IF NOT EXISTS "DebtCategory" AS ENUM ('FINE', 'IPVA', 'LICENSING', 'INSURANCE', 'TOLL', 'TAX', 'OTHER');
 
 -- CreateEnum
-CREATE TYPE "VehicleImplementHistoryEventType" AS ENUM ('LINKED', 'UNLINKED', 'POSITION_CHANGED');
+CREATE TYPE IF NOT EXISTS "VehicleImplementHistoryEventType" AS ENUM ('LINKED', 'UNLINKED', 'POSITION_CHANGED');
 
 -- CreateEnum
-CREATE TYPE "TireMovementType" AS ENUM ('MOVE', 'ROTATION');
+CREATE TYPE IF NOT EXISTS "TireMovementType" AS ENUM ('MOVE', 'ROTATION');
 
 -- CreateEnum
-CREATE TYPE "TireStatus" AS ENUM ('IN_STOCK', 'INSTALLED', 'MAINTENANCE', 'RETREADED', 'SCRAPPED');
+CREATE TYPE IF NOT EXISTS "TireStatus" AS ENUM ('IN_STOCK', 'INSTALLED', 'MAINTENANCE', 'RETREADED', 'SCRAPPED');
 
 -- CreateEnum
-CREATE TYPE "DocumentType" AS ENUM ('LICENSING', 'INSURANCE', 'IPVA', 'LEASING_CONTRACT', 'INSPECTION', 'CNH', 'EAR', 'MOPP', 'TOXICOLOGICAL_EXAM', 'EMPLOYMENT_RECORD', 'RG', 'CPF_DOCUMENT', 'DEFENSIVE_DRIVING', 'TRUCAO_TRANSPORTE', 'CRLV', 'CIV', 'CIPP', 'ENVIRONMENTAL_AUTHORIZATION', 'RNTRC', 'OTHER');
+CREATE TYPE IF NOT EXISTS "DocumentType" AS ENUM ('LICENSING', 'INSURANCE', 'IPVA', 'LEASING_CONTRACT', 'INSPECTION', 'CNH', 'EAR', 'MOPP', 'TOXICOLOGICAL_EXAM', 'EMPLOYMENT_RECORD', 'RG', 'CPF_DOCUMENT', 'DEFENSIVE_DRIVING', 'TRUCAO_TRANSPORTE', 'CRLV', 'CIV', 'CIPP', 'ENVIRONMENTAL_AUTHORIZATION', 'RNTRC', 'OTHER');
 
 -- CreateEnum
-CREATE TYPE "DocumentOwnerType" AS ENUM ('VEHICLE', 'DRIVER', 'GENERAL');
+CREATE TYPE IF NOT EXISTS "DocumentOwnerType" AS ENUM ('VEHICLE', 'DRIVER', 'GENERAL');
 
 -- CreateEnum
-CREATE TYPE "PlanInterval" AS ENUM ('MONTHLY', 'YEARLY');
+CREATE TYPE IF NOT EXISTS "PlanInterval" AS ENUM ('MONTHLY', 'YEARLY');
 
 -- CreateEnum
-CREATE TYPE "SubscriptionStatus" AS ENUM ('DRAFT', 'TRIALING', 'ACTIVE', 'PAST_DUE', 'CANCELED');
+CREATE TYPE IF NOT EXISTS "SubscriptionStatus" AS ENUM ('DRAFT', 'TRIALING', 'ACTIVE', 'PAST_DUE', 'CANCELED');
 
 -- CreateEnum
-CREATE TYPE "PaymentStatus" AS ENUM ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'REFUNDED', 'CANCELED');
+CREATE TYPE IF NOT EXISTS "PaymentStatus" AS ENUM ('PENDING', 'PAID', 'EXPIRED', 'FAILED', 'REFUNDED', 'CANCELED');
 
 -- CreateEnum
-CREATE TYPE "BillingGateway" AS ENUM ('MANUAL', 'INFINITEPAY');
+CREATE TYPE IF NOT EXISTS "BillingGateway" AS ENUM ('MANUAL', 'INFINITEPAY');
 
 -- CreateEnum
-CREATE TYPE "WebhookProcessStatus" AS ENUM ('PENDING', 'PROCESSED', 'FAILED');
+CREATE TYPE IF NOT EXISTS "WebhookProcessStatus" AS ENUM ('PENDING', 'PROCESSED', 'FAILED');
 
 -- CreateEnum
-CREATE TYPE "SupportRequestCategory" AS ENUM ('BUG', 'IMPROVEMENT', 'REQUEST');
+CREATE TYPE IF NOT EXISTS "SupportRequestCategory" AS ENUM ('BUG', 'IMPROVEMENT', 'REQUEST');
 
 -- CreateEnum
-CREATE TYPE "SupportRequestStatus" AS ENUM ('OPEN', 'IN_PROGRESS', 'COMPLETED');
+CREATE TYPE IF NOT EXISTS "SupportRequestStatus" AS ENUM ('OPEN', 'IN_PROGRESS', 'COMPLETED');
 
 -- CreateEnum
-CREATE TYPE "XmlImportBatchStatus" AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'COMPLETED_WITH_ERRORS', 'FAILED');
+CREATE TYPE IF NOT EXISTS "XmlImportBatchStatus" AS ENUM ('PENDING', 'PROCESSING', 'COMPLETED', 'COMPLETED_WITH_ERRORS', 'FAILED');
 
 -- CreateEnum
-CREATE TYPE "XmlInvoiceStatus" AS ENUM ('AUTHORIZED', 'CANCELED', 'DENIED', 'UNKNOWN');
+CREATE TYPE IF NOT EXISTS "XmlInvoiceStatus" AS ENUM ('AUTHORIZED', 'CANCELED', 'DENIED', 'UNKNOWN');
 
 -- CreateEnum
-CREATE TYPE "XmlProcessingType" AS ENUM ('FUEL', 'PRODUCT', 'SERVICE', 'RETAIL_PRODUCT', 'UNKNOWN');
+CREATE TYPE IF NOT EXISTS "XmlProcessingType" AS ENUM ('FUEL', 'PRODUCT', 'SERVICE', 'RETAIL_PRODUCT', 'UNKNOWN');
 
 -- CreateEnum
-CREATE TYPE "XmlProcessingStatus" AS ENUM ('PENDING', 'SUGGESTED', 'PROCESSED', 'IGNORED', 'ERROR');
+CREATE TYPE IF NOT EXISTS "XmlProcessingStatus" AS ENUM ('PENDING', 'SUGGESTED', 'PROCESSED', 'IGNORED', 'ERROR');
 
 -- CreateEnum
-CREATE TYPE "AxleConfiguration" AS ENUM ('SINGLE', 'DUAL');
+CREATE TYPE IF NOT EXISTS "AxleConfiguration" AS ENUM ('SINGLE', 'DUAL');
 
 -- CreateTable
-CREATE TABLE "Company" (
+CREATE TABLE IF NOT EXISTS "Company" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "document" TEXT,
@@ -85,7 +85,7 @@ CREATE TABLE "Company" (
 );
 
 -- CreateTable
-CREATE TABLE "Branch" (
+CREATE TABLE IF NOT EXISTS "Branch" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "city" TEXT NOT NULL,
@@ -97,7 +97,7 @@ CREATE TABLE "Branch" (
 );
 
 -- CreateTable
-CREATE TABLE "Vehicle" (
+CREATE TABLE IF NOT EXISTS "Vehicle" (
     "id" TEXT NOT NULL,
     "plate" TEXT NOT NULL,
     "model" TEXT NOT NULL,
@@ -126,7 +126,7 @@ CREATE TABLE "Vehicle" (
 );
 
 -- CreateTable
-CREATE TABLE "VehicleProfilePhoto" (
+CREATE TABLE IF NOT EXISTS "VehicleProfilePhoto" (
     "id" TEXT NOT NULL,
     "filename" TEXT NOT NULL,
     "mimeType" TEXT NOT NULL,
@@ -140,7 +140,7 @@ CREATE TABLE "VehicleProfilePhoto" (
 );
 
 -- CreateTable
-CREATE TABLE "CostCenter" (
+CREATE TABLE IF NOT EXISTS "CostCenter" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
 
@@ -148,7 +148,7 @@ CREATE TABLE "CostCenter" (
 );
 
 -- CreateTable
-CREATE TABLE "User" (
+CREATE TABLE IF NOT EXISTS "User" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "email" TEXT NOT NULL,
@@ -161,7 +161,7 @@ CREATE TABLE "User" (
 );
 
 -- CreateTable
-CREATE TABLE "Driver" (
+CREATE TABLE IF NOT EXISTS "Driver" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "cpf" TEXT NOT NULL,
@@ -177,7 +177,7 @@ CREATE TABLE "Driver" (
 );
 
 -- CreateTable
-CREATE TABLE "MaintenanceRecord" (
+CREATE TABLE IF NOT EXISTS "MaintenanceRecord" (
     "id" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "description" TEXT NOT NULL,
@@ -196,7 +196,7 @@ CREATE TABLE "MaintenanceRecord" (
 );
 
 -- CreateTable
-CREATE TABLE "MaintenancePlan" (
+CREATE TABLE IF NOT EXISTS "MaintenancePlan" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "planType" TEXT NOT NULL,
@@ -217,7 +217,7 @@ CREATE TABLE "MaintenancePlan" (
 );
 
 -- CreateTable
-CREATE TABLE "Debt" (
+CREATE TABLE IF NOT EXISTS "Debt" (
     "id" TEXT NOT NULL,
     "description" TEXT NOT NULL,
     "category" "DebtCategory" NOT NULL DEFAULT 'FINE',
@@ -236,7 +236,7 @@ CREATE TABLE "Debt" (
 );
 
 -- CreateTable
-CREATE TABLE "FuelRecord" (
+CREATE TABLE IF NOT EXISTS "FuelRecord" (
     "id" TEXT NOT NULL,
     "invoiceNumber" TEXT,
     "liters" DOUBLE PRECISION NOT NULL,
@@ -262,7 +262,7 @@ CREATE TABLE "FuelRecord" (
 );
 
 -- CreateTable
-CREATE TABLE "VehicleChangeLog" (
+CREATE TABLE IF NOT EXISTS "VehicleChangeLog" (
     "id" TEXT NOT NULL,
     "field" TEXT NOT NULL,
     "oldValue" TEXT,
@@ -274,7 +274,7 @@ CREATE TABLE "VehicleChangeLog" (
 );
 
 -- CreateTable
-CREATE TABLE "VehicleImplementHistory" (
+CREATE TABLE IF NOT EXISTS "VehicleImplementHistory" (
     "id" TEXT NOT NULL,
     "eventType" "VehicleImplementHistoryEventType" NOT NULL,
     "position" INTEGER,
@@ -289,7 +289,7 @@ CREATE TABLE "VehicleImplementHistory" (
 );
 
 -- CreateTable
-CREATE TABLE "AuditLog" (
+CREATE TABLE IF NOT EXISTS "AuditLog" (
     "id" TEXT NOT NULL,
     "action" TEXT NOT NULL,
     "entity" TEXT NOT NULL,
@@ -304,7 +304,7 @@ CREATE TABLE "AuditLog" (
 );
 
 -- CreateTable
-CREATE TABLE "SystemSetting" (
+CREATE TABLE IF NOT EXISTS "SystemSetting" (
     "id" TEXT NOT NULL,
     "key" TEXT NOT NULL,
     "value" JSONB NOT NULL,
@@ -315,7 +315,7 @@ CREATE TABLE "SystemSetting" (
 );
 
 -- CreateTable
-CREATE TABLE "TripUsage" (
+CREATE TABLE IF NOT EXISTS "TripUsage" (
     "id" TEXT NOT NULL,
     "origin" TEXT NOT NULL,
     "destination" TEXT NOT NULL,
@@ -334,7 +334,7 @@ CREATE TABLE "TripUsage" (
 );
 
 -- CreateTable
-CREATE TABLE "VehicleDocument" (
+CREATE TABLE IF NOT EXISTS "VehicleDocument" (
     "id" TEXT NOT NULL,
     "type" "DocumentType" NOT NULL,
     "ownerType" "DocumentOwnerType" NOT NULL DEFAULT 'VEHICLE',
@@ -356,7 +356,7 @@ CREATE TABLE "VehicleDocument" (
 );
 
 -- CreateTable
-CREATE TABLE "VehicleImplementLink" (
+CREATE TABLE IF NOT EXISTS "VehicleImplementLink" (
     "id" TEXT NOT NULL,
     "vehicleId" TEXT NOT NULL,
     "implementId" TEXT NOT NULL,
@@ -368,7 +368,7 @@ CREATE TABLE "VehicleImplementLink" (
 );
 
 -- CreateTable
-CREATE TABLE "Tire" (
+CREATE TABLE IF NOT EXISTS "Tire" (
     "id" TEXT NOT NULL,
     "serialNumber" TEXT NOT NULL,
     "brand" TEXT NOT NULL,
@@ -395,7 +395,7 @@ CREATE TABLE "Tire" (
 );
 
 -- CreateTable
-CREATE TABLE "TireReading" (
+CREATE TABLE IF NOT EXISTS "TireReading" (
     "id" TEXT NOT NULL,
     "readingDate" TIMESTAMP(3) NOT NULL,
     "km" INTEGER NOT NULL,
@@ -411,7 +411,7 @@ CREATE TABLE "TireReading" (
 );
 
 -- CreateTable
-CREATE TABLE "TireMovement" (
+CREATE TABLE IF NOT EXISTS "TireMovement" (
     "id" TEXT NOT NULL,
     "companyId" TEXT NOT NULL,
     "vehicleId" TEXT,
@@ -431,7 +431,7 @@ CREATE TABLE "TireMovement" (
 );
 
 -- CreateTable
-CREATE TABLE "Plan" (
+CREATE TABLE IF NOT EXISTS "Plan" (
     "id" TEXT NOT NULL,
     "code" TEXT NOT NULL,
     "name" TEXT NOT NULL,
@@ -455,7 +455,7 @@ CREATE TABLE "Plan" (
 );
 
 -- CreateTable
-CREATE TABLE "Subscription" (
+CREATE TABLE IF NOT EXISTS "Subscription" (
     "id" TEXT NOT NULL,
     "status" "SubscriptionStatus" NOT NULL DEFAULT 'DRAFT',
     "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -488,7 +488,7 @@ CREATE TABLE "Subscription" (
 );
 
 -- CreateTable
-CREATE TABLE "Payment" (
+CREATE TABLE IF NOT EXISTS "Payment" (
     "id" TEXT NOT NULL,
     "gateway" "BillingGateway" NOT NULL DEFAULT 'MANUAL',
     "status" "PaymentStatus" NOT NULL DEFAULT 'PENDING',
@@ -510,7 +510,7 @@ CREATE TABLE "Payment" (
 );
 
 -- CreateTable
-CREATE TABLE "WebhookEvent" (
+CREATE TABLE IF NOT EXISTS "WebhookEvent" (
     "id" TEXT NOT NULL,
     "gateway" "BillingGateway" NOT NULL DEFAULT 'MANUAL',
     "eventType" TEXT NOT NULL,
@@ -527,7 +527,7 @@ CREATE TABLE "WebhookEvent" (
 );
 
 -- CreateTable
-CREATE TABLE "XmlImportBatch" (
+CREATE TABLE IF NOT EXISTS "XmlImportBatch" (
     "id" TEXT NOT NULL,
     "fileName" TEXT NOT NULL,
     "periodLabel" TEXT,
@@ -545,7 +545,7 @@ CREATE TABLE "XmlImportBatch" (
 );
 
 -- CreateTable
-CREATE TABLE "XmlInvoice" (
+CREATE TABLE IF NOT EXISTS "XmlInvoice" (
     "id" TEXT NOT NULL,
     "fileName" TEXT NOT NULL,
     "folderName" TEXT,
@@ -578,7 +578,7 @@ CREATE TABLE "XmlInvoice" (
 );
 
 -- CreateTable
-CREATE TABLE "XmlInvoiceItem" (
+CREATE TABLE IF NOT EXISTS "XmlInvoiceItem" (
     "id" TEXT NOT NULL,
     "productCode" TEXT,
     "description" TEXT NOT NULL,
@@ -592,7 +592,7 @@ CREATE TABLE "XmlInvoiceItem" (
 );
 
 -- CreateTable
-CREATE TABLE "RetailProductImport" (
+CREATE TABLE IF NOT EXISTS "RetailProductImport" (
     "id" TEXT NOT NULL,
     "supplierName" TEXT,
     "supplierDocument" TEXT,
@@ -613,7 +613,7 @@ CREATE TABLE "RetailProductImport" (
 );
 
 -- CreateTable
-CREATE TABLE "RetailProductImportItem" (
+CREATE TABLE IF NOT EXISTS "RetailProductImportItem" (
     "id" TEXT NOT NULL,
     "productCode" TEXT,
     "description" TEXT NOT NULL,
@@ -631,7 +631,7 @@ CREATE TABLE "RetailProductImportItem" (
 );
 
 -- CreateTable
-CREATE TABLE "SupportRequest" (
+CREATE TABLE IF NOT EXISTS "SupportRequest" (
     "id" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "description" TEXT NOT NULL,
@@ -653,292 +653,292 @@ CREATE TABLE "SupportRequest" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Company_slug_key" ON "Company"("slug");
+CREATE UNIQUE INDEX IF NOT EXISTS "Company_slug_key" ON "Company"("slug");
 
 -- CreateIndex
-CREATE INDEX "Company_active_idx" ON "Company"("active");
+CREATE INDEX IF NOT EXISTS "Company_active_idx" ON "Company"("active");
 
 -- CreateIndex
-CREATE INDEX "Branch_companyId_idx" ON "Branch"("companyId");
+CREATE INDEX IF NOT EXISTS "Branch_companyId_idx" ON "Branch"("companyId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Vehicle_plate_key" ON "Vehicle"("plate");
+CREATE UNIQUE INDEX IF NOT EXISTS "Vehicle_plate_key" ON "Vehicle"("plate");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Vehicle_chassis_key" ON "Vehicle"("chassis");
+CREATE UNIQUE INDEX IF NOT EXISTS "Vehicle_chassis_key" ON "Vehicle"("chassis");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Vehicle_renavam_key" ON "Vehicle"("renavam");
+CREATE UNIQUE INDEX IF NOT EXISTS "Vehicle_renavam_key" ON "Vehicle"("renavam");
 
 -- CreateIndex
-CREATE INDEX "Vehicle_companyId_idx" ON "Vehicle"("companyId");
+CREATE INDEX IF NOT EXISTS "Vehicle_companyId_idx" ON "Vehicle"("companyId");
 
 -- CreateIndex
-CREATE INDEX "Vehicle_branchId_idx" ON "Vehicle"("branchId");
+CREATE INDEX IF NOT EXISTS "Vehicle_branchId_idx" ON "Vehicle"("branchId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "VehicleProfilePhoto_vehicleId_key" ON "VehicleProfilePhoto"("vehicleId");
+CREATE UNIQUE INDEX IF NOT EXISTS "VehicleProfilePhoto_vehicleId_key" ON "VehicleProfilePhoto"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "VehicleProfilePhoto_vehicleId_idx" ON "VehicleProfilePhoto"("vehicleId");
+CREATE INDEX IF NOT EXISTS "VehicleProfilePhoto_vehicleId_idx" ON "VehicleProfilePhoto"("vehicleId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key" ON "User"("email");
 
 -- CreateIndex
-CREATE INDEX "User_companyId_idx" ON "User"("companyId");
+CREATE INDEX IF NOT EXISTS "User_companyId_idx" ON "User"("companyId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Driver_cpf_key" ON "Driver"("cpf");
+CREATE UNIQUE INDEX IF NOT EXISTS "Driver_cpf_key" ON "Driver"("cpf");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Driver_cnh_key" ON "Driver"("cnh");
+CREATE UNIQUE INDEX IF NOT EXISTS "Driver_cnh_key" ON "Driver"("cnh");
 
 -- CreateIndex
-CREATE INDEX "MaintenanceRecord_vehicleId_idx" ON "MaintenanceRecord"("vehicleId");
+CREATE INDEX IF NOT EXISTS "MaintenanceRecord_vehicleId_idx" ON "MaintenanceRecord"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "MaintenancePlan_vehicleId_idx" ON "MaintenancePlan"("vehicleId");
+CREATE INDEX IF NOT EXISTS "MaintenancePlan_vehicleId_idx" ON "MaintenancePlan"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "MaintenancePlan_nextDueDate_idx" ON "MaintenancePlan"("nextDueDate");
+CREATE INDEX IF NOT EXISTS "MaintenancePlan_nextDueDate_idx" ON "MaintenancePlan"("nextDueDate");
 
 -- CreateIndex
-CREATE INDEX "Debt_vehicleId_idx" ON "Debt"("vehicleId");
+CREATE INDEX IF NOT EXISTS "Debt_vehicleId_idx" ON "Debt"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "FuelRecord_vehicleId_idx" ON "FuelRecord"("vehicleId");
+CREATE INDEX IF NOT EXISTS "FuelRecord_vehicleId_idx" ON "FuelRecord"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "FuelRecord_driverId_idx" ON "FuelRecord"("driverId");
+CREATE INDEX IF NOT EXISTS "FuelRecord_driverId_idx" ON "FuelRecord"("driverId");
 
 -- CreateIndex
-CREATE INDEX "FuelRecord_isAnomaly_idx" ON "FuelRecord"("isAnomaly");
+CREATE INDEX IF NOT EXISTS "FuelRecord_isAnomaly_idx" ON "FuelRecord"("isAnomaly");
 
 -- CreateIndex
-CREATE INDEX "FuelRecord_invoiceNumber_idx" ON "FuelRecord"("invoiceNumber");
+CREATE INDEX IF NOT EXISTS "FuelRecord_invoiceNumber_idx" ON "FuelRecord"("invoiceNumber");
 
 -- CreateIndex
-CREATE INDEX "FuelRecord_sourceInvoiceKey_sourceInvoiceLineIndex_idx" ON "FuelRecord"("sourceInvoiceKey", "sourceInvoiceLineIndex");
+CREATE INDEX IF NOT EXISTS "FuelRecord_sourceInvoiceKey_sourceInvoiceLineIndex_idx" ON "FuelRecord"("sourceInvoiceKey", "sourceInvoiceLineIndex");
 
 -- CreateIndex
-CREATE INDEX "FuelRecord_sourceInvoiceKey_sourcePlate_fuelType_idx" ON "FuelRecord"("sourceInvoiceKey", "sourcePlate", "fuelType");
+CREATE INDEX IF NOT EXISTS "FuelRecord_sourceInvoiceKey_sourcePlate_fuelType_idx" ON "FuelRecord"("sourceInvoiceKey", "sourcePlate", "fuelType");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "FuelRecord_sourceInvoiceKey_sourcePlate_fuelType_key" ON "FuelRecord"("sourceInvoiceKey", "sourcePlate", "fuelType");
+CREATE UNIQUE INDEX IF NOT EXISTS "FuelRecord_sourceInvoiceKey_sourcePlate_fuelType_key" ON "FuelRecord"("sourceInvoiceKey", "sourcePlate", "fuelType");
 
 -- CreateIndex
-CREATE INDEX "VehicleChangeLog_vehicleId_idx" ON "VehicleChangeLog"("vehicleId");
+CREATE INDEX IF NOT EXISTS "VehicleChangeLog_vehicleId_idx" ON "VehicleChangeLog"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "VehicleChangeLog_changedAt_idx" ON "VehicleChangeLog"("changedAt");
+CREATE INDEX IF NOT EXISTS "VehicleChangeLog_changedAt_idx" ON "VehicleChangeLog"("changedAt");
 
 -- CreateIndex
-CREATE INDEX "VehicleImplementHistory_vehicleId_changedAt_idx" ON "VehicleImplementHistory"("vehicleId", "changedAt");
+CREATE INDEX IF NOT EXISTS "VehicleImplementHistory_vehicleId_changedAt_idx" ON "VehicleImplementHistory"("vehicleId", "changedAt");
 
 -- CreateIndex
-CREATE INDEX "VehicleImplementHistory_implementId_changedAt_idx" ON "VehicleImplementHistory"("implementId", "changedAt");
+CREATE INDEX IF NOT EXISTS "VehicleImplementHistory_implementId_changedAt_idx" ON "VehicleImplementHistory"("implementId", "changedAt");
 
 -- CreateIndex
-CREATE INDEX "VehicleImplementHistory_actorUserId_idx" ON "VehicleImplementHistory"("actorUserId");
+CREATE INDEX IF NOT EXISTS "VehicleImplementHistory_actorUserId_idx" ON "VehicleImplementHistory"("actorUserId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "SystemSetting_key_key" ON "SystemSetting"("key");
+CREATE UNIQUE INDEX IF NOT EXISTS "SystemSetting_key_key" ON "SystemSetting"("key");
 
 -- CreateIndex
-CREATE INDEX "TripUsage_vehicleId_idx" ON "TripUsage"("vehicleId");
+CREATE INDEX IF NOT EXISTS "TripUsage_vehicleId_idx" ON "TripUsage"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "TripUsage_driverId_idx" ON "TripUsage"("driverId");
+CREATE INDEX IF NOT EXISTS "TripUsage_driverId_idx" ON "TripUsage"("driverId");
 
 -- CreateIndex
-CREATE INDEX "TripUsage_startedAt_idx" ON "TripUsage"("startedAt");
+CREATE INDEX IF NOT EXISTS "TripUsage_startedAt_idx" ON "TripUsage"("startedAt");
 
 -- CreateIndex
-CREATE INDEX "VehicleDocument_companyId_idx" ON "VehicleDocument"("companyId");
+CREATE INDEX IF NOT EXISTS "VehicleDocument_companyId_idx" ON "VehicleDocument"("companyId");
 
 -- CreateIndex
-CREATE INDEX "VehicleDocument_vehicleId_idx" ON "VehicleDocument"("vehicleId");
+CREATE INDEX IF NOT EXISTS "VehicleDocument_vehicleId_idx" ON "VehicleDocument"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "VehicleDocument_driverId_idx" ON "VehicleDocument"("driverId");
+CREATE INDEX IF NOT EXISTS "VehicleDocument_driverId_idx" ON "VehicleDocument"("driverId");
 
 -- CreateIndex
-CREATE INDEX "VehicleDocument_ownerType_idx" ON "VehicleDocument"("ownerType");
+CREATE INDEX IF NOT EXISTS "VehicleDocument_ownerType_idx" ON "VehicleDocument"("ownerType");
 
 -- CreateIndex
-CREATE INDEX "VehicleDocument_expiryDate_idx" ON "VehicleDocument"("expiryDate");
+CREATE INDEX IF NOT EXISTS "VehicleDocument_expiryDate_idx" ON "VehicleDocument"("expiryDate");
 
 -- CreateIndex
-CREATE INDEX "VehicleImplementLink_vehicleId_idx" ON "VehicleImplementLink"("vehicleId");
+CREATE INDEX IF NOT EXISTS "VehicleImplementLink_vehicleId_idx" ON "VehicleImplementLink"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "VehicleImplementLink_implementId_idx" ON "VehicleImplementLink"("implementId");
+CREATE INDEX IF NOT EXISTS "VehicleImplementLink_implementId_idx" ON "VehicleImplementLink"("implementId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "VehicleImplementLink_vehicleId_implementId_key" ON "VehicleImplementLink"("vehicleId", "implementId");
+CREATE UNIQUE INDEX IF NOT EXISTS "VehicleImplementLink_vehicleId_implementId_key" ON "VehicleImplementLink"("vehicleId", "implementId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "VehicleImplementLink_vehicleId_position_key" ON "VehicleImplementLink"("vehicleId", "position");
+CREATE UNIQUE INDEX IF NOT EXISTS "VehicleImplementLink_vehicleId_position_key" ON "VehicleImplementLink"("vehicleId", "position");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Tire_serialNumber_key" ON "Tire"("serialNumber");
+CREATE UNIQUE INDEX IF NOT EXISTS "Tire_serialNumber_key" ON "Tire"("serialNumber");
 
 -- CreateIndex
-CREATE INDEX "Tire_vehicleId_idx" ON "Tire"("vehicleId");
+CREATE INDEX IF NOT EXISTS "Tire_vehicleId_idx" ON "Tire"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "Tire_status_idx" ON "Tire"("status");
+CREATE INDEX IF NOT EXISTS "Tire_status_idx" ON "Tire"("status");
 
 -- CreateIndex
-CREATE INDEX "TireReading_tireId_idx" ON "TireReading"("tireId");
+CREATE INDEX IF NOT EXISTS "TireReading_tireId_idx" ON "TireReading"("tireId");
 
 -- CreateIndex
-CREATE INDEX "TireReading_vehicleId_idx" ON "TireReading"("vehicleId");
+CREATE INDEX IF NOT EXISTS "TireReading_vehicleId_idx" ON "TireReading"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "TireReading_readingDate_idx" ON "TireReading"("readingDate");
+CREATE INDEX IF NOT EXISTS "TireReading_readingDate_idx" ON "TireReading"("readingDate");
 
 -- CreateIndex
-CREATE INDEX "TireMovement_companyId_vehicleId_createdAt_idx" ON "TireMovement"("companyId", "vehicleId", "createdAt");
+CREATE INDEX IF NOT EXISTS "TireMovement_companyId_vehicleId_createdAt_idx" ON "TireMovement"("companyId", "vehicleId", "createdAt");
 
 -- CreateIndex
-CREATE INDEX "TireMovement_companyId_tireId_createdAt_idx" ON "TireMovement"("companyId", "tireId", "createdAt");
+CREATE INDEX IF NOT EXISTS "TireMovement_companyId_tireId_createdAt_idx" ON "TireMovement"("companyId", "tireId", "createdAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Plan_code_key" ON "Plan"("code");
+CREATE UNIQUE INDEX IF NOT EXISTS "Plan_code_key" ON "Plan"("code");
 
 -- CreateIndex
-CREATE INDEX "Plan_isActive_idx" ON "Plan"("isActive");
+CREATE INDEX IF NOT EXISTS "Plan_isActive_idx" ON "Plan"("isActive");
 
 -- CreateIndex
-CREATE INDEX "Plan_isPublic_idx" ON "Plan"("isPublic");
+CREATE INDEX IF NOT EXISTS "Plan_isPublic_idx" ON "Plan"("isPublic");
 
 -- CreateIndex
-CREATE INDEX "Plan_isEnterprise_idx" ON "Plan"("isEnterprise");
+CREATE INDEX IF NOT EXISTS "Plan_isEnterprise_idx" ON "Plan"("isEnterprise");
 
 -- CreateIndex
-CREATE INDEX "Plan_sortOrder_idx" ON "Plan"("sortOrder");
+CREATE INDEX IF NOT EXISTS "Plan_sortOrder_idx" ON "Plan"("sortOrder");
 
 -- CreateIndex
-CREATE INDEX "Subscription_companyId_idx" ON "Subscription"("companyId");
+CREATE INDEX IF NOT EXISTS "Subscription_companyId_idx" ON "Subscription"("companyId");
 
 -- CreateIndex
-CREATE INDEX "Subscription_planId_idx" ON "Subscription"("planId");
+CREATE INDEX IF NOT EXISTS "Subscription_planId_idx" ON "Subscription"("planId");
 
 -- CreateIndex
-CREATE INDEX "Subscription_status_idx" ON "Subscription"("status");
+CREATE INDEX IF NOT EXISTS "Subscription_status_idx" ON "Subscription"("status");
 
 -- CreateIndex
-CREATE INDEX "Subscription_graceEndsAt_idx" ON "Subscription"("graceEndsAt");
+CREATE INDEX IF NOT EXISTS "Subscription_graceEndsAt_idx" ON "Subscription"("graceEndsAt");
 
 -- CreateIndex
-CREATE INDEX "Subscription_accessBlockedAt_idx" ON "Subscription"("accessBlockedAt");
+CREATE INDEX IF NOT EXISTS "Subscription_accessBlockedAt_idx" ON "Subscription"("accessBlockedAt");
 
 -- CreateIndex
-CREATE INDEX "Payment_companyId_idx" ON "Payment"("companyId");
+CREATE INDEX IF NOT EXISTS "Payment_companyId_idx" ON "Payment"("companyId");
 
 -- CreateIndex
-CREATE INDEX "Payment_subscriptionId_idx" ON "Payment"("subscriptionId");
+CREATE INDEX IF NOT EXISTS "Payment_subscriptionId_idx" ON "Payment"("subscriptionId");
 
 -- CreateIndex
-CREATE INDEX "Payment_status_idx" ON "Payment"("status");
+CREATE INDEX IF NOT EXISTS "Payment_status_idx" ON "Payment"("status");
 
 -- CreateIndex
-CREATE INDEX "Payment_dueDate_idx" ON "Payment"("dueDate");
+CREATE INDEX IF NOT EXISTS "Payment_dueDate_idx" ON "Payment"("dueDate");
 
 -- CreateIndex
-CREATE INDEX "Payment_gatewayReference_idx" ON "Payment"("gatewayReference");
+CREATE INDEX IF NOT EXISTS "Payment_gatewayReference_idx" ON "Payment"("gatewayReference");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "WebhookEvent_externalEventId_key" ON "WebhookEvent"("externalEventId");
+CREATE UNIQUE INDEX IF NOT EXISTS "WebhookEvent_externalEventId_key" ON "WebhookEvent"("externalEventId");
 
 -- CreateIndex
-CREATE INDEX "WebhookEvent_companyId_idx" ON "WebhookEvent"("companyId");
+CREATE INDEX IF NOT EXISTS "WebhookEvent_companyId_idx" ON "WebhookEvent"("companyId");
 
 -- CreateIndex
-CREATE INDEX "WebhookEvent_subscriptionId_idx" ON "WebhookEvent"("subscriptionId");
+CREATE INDEX IF NOT EXISTS "WebhookEvent_subscriptionId_idx" ON "WebhookEvent"("subscriptionId");
 
 -- CreateIndex
-CREATE INDEX "WebhookEvent_processStatus_idx" ON "WebhookEvent"("processStatus");
+CREATE INDEX IF NOT EXISTS "WebhookEvent_processStatus_idx" ON "WebhookEvent"("processStatus");
 
 -- CreateIndex
-CREATE INDEX "XmlImportBatch_companyId_idx" ON "XmlImportBatch"("companyId");
+CREATE INDEX IF NOT EXISTS "XmlImportBatch_companyId_idx" ON "XmlImportBatch"("companyId");
 
 -- CreateIndex
-CREATE INDEX "XmlImportBatch_branchId_idx" ON "XmlImportBatch"("branchId");
+CREATE INDEX IF NOT EXISTS "XmlImportBatch_branchId_idx" ON "XmlImportBatch"("branchId");
 
 -- CreateIndex
-CREATE INDEX "XmlImportBatch_status_idx" ON "XmlImportBatch"("status");
+CREATE INDEX IF NOT EXISTS "XmlImportBatch_status_idx" ON "XmlImportBatch"("status");
 
 -- CreateIndex
-CREATE INDEX "XmlImportBatch_createdAt_idx" ON "XmlImportBatch"("createdAt");
+CREATE INDEX IF NOT EXISTS "XmlImportBatch_createdAt_idx" ON "XmlImportBatch"("createdAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "XmlInvoice_invoiceKey_key" ON "XmlInvoice"("invoiceKey");
+CREATE UNIQUE INDEX IF NOT EXISTS "XmlInvoice_invoiceKey_key" ON "XmlInvoice"("invoiceKey");
 
 -- CreateIndex
-CREATE INDEX "XmlInvoice_batchId_idx" ON "XmlInvoice"("batchId");
+CREATE INDEX IF NOT EXISTS "XmlInvoice_batchId_idx" ON "XmlInvoice"("batchId");
 
 -- CreateIndex
-CREATE INDEX "XmlInvoice_companyId_idx" ON "XmlInvoice"("companyId");
+CREATE INDEX IF NOT EXISTS "XmlInvoice_companyId_idx" ON "XmlInvoice"("companyId");
 
 -- CreateIndex
-CREATE INDEX "XmlInvoice_branchId_idx" ON "XmlInvoice"("branchId");
+CREATE INDEX IF NOT EXISTS "XmlInvoice_branchId_idx" ON "XmlInvoice"("branchId");
 
 -- CreateIndex
-CREATE INDEX "XmlInvoice_issuedAt_idx" ON "XmlInvoice"("issuedAt");
+CREATE INDEX IF NOT EXISTS "XmlInvoice_issuedAt_idx" ON "XmlInvoice"("issuedAt");
 
 -- CreateIndex
-CREATE INDEX "XmlInvoice_linkedFuelRecordId_idx" ON "XmlInvoice"("linkedFuelRecordId");
+CREATE INDEX IF NOT EXISTS "XmlInvoice_linkedFuelRecordId_idx" ON "XmlInvoice"("linkedFuelRecordId");
 
 -- CreateIndex
-CREATE INDEX "XmlInvoice_linkedMaintenanceRecordId_idx" ON "XmlInvoice"("linkedMaintenanceRecordId");
+CREATE INDEX IF NOT EXISTS "XmlInvoice_linkedMaintenanceRecordId_idx" ON "XmlInvoice"("linkedMaintenanceRecordId");
 
 -- CreateIndex
-CREATE INDEX "XmlInvoice_linkedCostId_idx" ON "XmlInvoice"("linkedCostId");
+CREATE INDEX IF NOT EXISTS "XmlInvoice_linkedCostId_idx" ON "XmlInvoice"("linkedCostId");
 
 -- CreateIndex
-CREATE INDEX "XmlInvoice_linkedRetailProductImportId_idx" ON "XmlInvoice"("linkedRetailProductImportId");
+CREATE INDEX IF NOT EXISTS "XmlInvoice_linkedRetailProductImportId_idx" ON "XmlInvoice"("linkedRetailProductImportId");
 
 -- CreateIndex
-CREATE INDEX "XmlInvoiceItem_invoiceId_idx" ON "XmlInvoiceItem"("invoiceId");
+CREATE INDEX IF NOT EXISTS "XmlInvoiceItem_invoiceId_idx" ON "XmlInvoiceItem"("invoiceId");
 
 -- CreateIndex
-CREATE INDEX "RetailProductImport_companyId_idx" ON "RetailProductImport"("companyId");
+CREATE INDEX IF NOT EXISTS "RetailProductImport_companyId_idx" ON "RetailProductImport"("companyId");
 
 -- CreateIndex
-CREATE INDEX "RetailProductImport_branchId_idx" ON "RetailProductImport"("branchId");
+CREATE INDEX IF NOT EXISTS "RetailProductImport_branchId_idx" ON "RetailProductImport"("branchId");
 
 -- CreateIndex
-CREATE INDEX "RetailProductImport_vehicleId_idx" ON "RetailProductImport"("vehicleId");
+CREATE INDEX IF NOT EXISTS "RetailProductImport_vehicleId_idx" ON "RetailProductImport"("vehicleId");
 
 -- CreateIndex
-CREATE INDEX "RetailProductImport_issuedAt_idx" ON "RetailProductImport"("issuedAt");
+CREATE INDEX IF NOT EXISTS "RetailProductImport_issuedAt_idx" ON "RetailProductImport"("issuedAt");
 
 -- CreateIndex
-CREATE INDEX "RetailProductImport_sourceInvoiceKey_idx" ON "RetailProductImport"("sourceInvoiceKey");
+CREATE INDEX IF NOT EXISTS "RetailProductImport_sourceInvoiceKey_idx" ON "RetailProductImport"("sourceInvoiceKey");
 
 -- CreateIndex
-CREATE INDEX "RetailProductImport_sourcePlate_idx" ON "RetailProductImport"("sourcePlate");
+CREATE INDEX IF NOT EXISTS "RetailProductImport_sourcePlate_idx" ON "RetailProductImport"("sourcePlate");
 
 -- CreateIndex
-CREATE INDEX "RetailProductImportItem_retailProductImportId_idx" ON "RetailProductImportItem"("retailProductImportId");
+CREATE INDEX IF NOT EXISTS "RetailProductImportItem_retailProductImportId_idx" ON "RetailProductImportItem"("retailProductImportId");
 
 -- CreateIndex
-CREATE INDEX "RetailProductImportItem_sourceInvoiceKey_sourceInvoiceLineI_idx" ON "RetailProductImportItem"("sourceInvoiceKey", "sourceInvoiceLineIndex");
+CREATE INDEX IF NOT EXISTS "RetailProductImportItem_sourceInvoiceKey_sourceInvoiceLineI_idx" ON "RetailProductImportItem"("sourceInvoiceKey", "sourceInvoiceLineIndex");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "RetailProductImportItem_sourceInvoiceKey_sourceInvoiceLineI_key" ON "RetailProductImportItem"("sourceInvoiceKey", "sourceInvoiceLineIndex", "sourceProductCode");
+CREATE UNIQUE INDEX IF NOT EXISTS "RetailProductImportItem_sourceInvoiceKey_sourceInvoiceLineI_key" ON "RetailProductImportItem"("sourceInvoiceKey", "sourceInvoiceLineIndex", "sourceProductCode");
 
 -- CreateIndex
-CREATE INDEX "SupportRequest_companyId_idx" ON "SupportRequest"("companyId");
+CREATE INDEX IF NOT EXISTS "SupportRequest_companyId_idx" ON "SupportRequest"("companyId");
 
 -- CreateIndex
-CREATE INDEX "SupportRequest_status_idx" ON "SupportRequest"("status");
+CREATE INDEX IF NOT EXISTS "SupportRequest_status_idx" ON "SupportRequest"("status");
 
 -- CreateIndex
-CREATE INDEX "SupportRequest_createdAt_idx" ON "SupportRequest"("createdAt");
+CREATE INDEX IF NOT EXISTS "SupportRequest_createdAt_idx" ON "SupportRequest"("createdAt");
 
 -- AddForeignKey
 ALTER TABLE "Branch" ADD CONSTRAINT "Branch_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "Company"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
