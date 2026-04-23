@@ -8,6 +8,7 @@ import {
   Length,
   Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export enum TireStatusDto {
   IN_STOCK = 'IN_STOCK',
@@ -20,25 +21,32 @@ export enum TireStatusDto {
 export class CreateTireDto {
   @IsString()
   @Length(4, 80)
-  serialNumber: string;
+  serialNumber!: string;
 
   @IsString()
   @Length(2, 40)
-  brand: string;
+  brand!: string;
 
   @IsString()
   @Length(2, 60)
-  model: string;
+  model!: string;
 
   @IsString()
   @Length(2, 40)
-  size: string;
+  size!: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'O aro deve ser um número válido.' })
+  @Min(1)
+  rim?: number;
 
   @IsOptional()
   @IsDateString()
   purchaseDate?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   purchaseCost?: number;
@@ -58,26 +66,31 @@ export class CreateTireDto {
   wheelPosition?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   currentKm?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   currentTreadDepthMm?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   currentPressurePsi?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   targetPressurePsi?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   minTreadDepthMm?: number;

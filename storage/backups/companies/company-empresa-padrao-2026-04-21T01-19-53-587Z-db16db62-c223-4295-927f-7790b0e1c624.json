@@ -1,0 +1,64 @@
+{
+  "metadata": {
+    "generatedAt": "2026-04-21T01:19:53.587Z",
+    "actorUserId": "70b4ed4b-1f4f-4cef-bb71-1787fb9851bc",
+    "companyId": "00000000-0000-0000-0000-000000000001",
+    "backupType": "company-delete-with-backup",
+    "storageDriver": "local-disk",
+    "missingRelations": []
+  },
+  "company": {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "name": "Empresa Padrão",
+    "document": null,
+    "slug": "empresa-padrao",
+    "active": true,
+    "legalAcceptanceVersion": null,
+    "legalAcceptedAt": null,
+    "legalAcceptedByUserId": null,
+    "legalAcceptedByUserName": null,
+    "createdAt": "2026-04-20T10:21:12.434Z",
+    "updatedAt": "2026-04-20T10:21:12.434Z"
+  },
+  "branches": [],
+  "users": [
+    {
+      "id": "70b4ed4b-1f4f-4cef-bb71-1787fb9851bc",
+      "name": "Christian",
+      "email": "christian@evsystem.com.br",
+      "password": "$2b$10$usX6DCRPwz77UvjN2vDWUezj6weV/fpsFcMoBC2Fh8qkwSFV8BmmC",
+      "role": "ADMIN",
+      "createdAt": "2026-04-20T13:21:13.422Z",
+      "companyId": "00000000-0000-0000-0000-000000000001"
+    }
+  ],
+  "subscriptions": [],
+  "payments": [],
+  "webhookEvents": [],
+  "vehicles": [],
+  "vehicleProfilePhotos": [],
+  "vehicleChangeLogs": [],
+  "drivers": [],
+  "maintenanceRecords": [],
+  "maintenancePlans": [],
+  "debts": [],
+  "fuelRecords": [],
+  "trips": [],
+  "vehicleDocuments": [],
+  "tires": [],
+  "tireReadings": [],
+  "xmlImportBatches": [],
+  "xmlInvoices": [],
+  "xmlInvoiceItems": [],
+  "retailProductImports": [],
+  "retailProductImportItems": [],
+  "references": {
+    "branchIds": [],
+    "vehicleIds": [],
+    "tireIds": [],
+    "subscriptionIds": [],
+    "batchIds": [],
+    "invoiceIds": [],
+    "retailImportIds": []
+  }
+}

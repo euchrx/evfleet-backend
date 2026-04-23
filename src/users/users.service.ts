@@ -4,8 +4,8 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Prisma, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -19,7 +19,9 @@ export class UsersService {
       where: { email: data.email },
     });
 
-    if (existing) throw new BadRequestException('Email já cadastrado');
+    if (existing) {
+      throw new BadRequestException('Email já cadastrado');
+    }
 
     const passwordHash = await bcrypt.hash(data.password, 10);
     const companyId = await this.resolveCompanyId(data.role, data.companyId);
@@ -46,7 +48,7 @@ export class UsersService {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2011' &&
-        data.role === 'ADMIN' &&
+        data.role === Role.ADMIN &&
         !companyId
       ) {
         throw new BadRequestException(
@@ -85,7 +87,10 @@ export class UsersService {
       },
     });
 
-    if (!user) throw new NotFoundException('Usuário não encontrado');
+    if (!user) {
+      throw new NotFoundException('Usuário não encontrado');
+    }
+
     return user;
   }
 
@@ -111,7 +116,8 @@ export class UsersService {
       name?: string;
       email?: string;
       password?: string;
-      role?: UpdateUserDto['role'];
+      role?: Role;
+      companyId?: string | null;
     } = {};
 
     if (dto.name !== undefined) data.name = dto.name;
@@ -119,6 +125,28 @@ export class UsersService {
     if (dto.role !== undefined) data.role = dto.role;
     if (dto.password !== undefined) {
       data.password = await bcrypt.hash(dto.password, 10);
+    }
+
+    if (dto.companyId !== undefined || dto.role !== undefined) {
+      const currentUser = await this.prisma.user.findUnique({
+        where: { id },
+        select: {
+          role: true,
+          companyId: true,
+        },
+      });
+
+      if (!currentUser) {
+        throw new NotFoundException('Usuário não encontrado');
+      }
+
+      const nextRole: Role = dto.role ?? currentUser.role;
+      const nextCompanyId =
+        dto.companyId !== undefined
+          ? dto.companyId
+          : (currentUser.companyId ?? undefined);
+
+      data.companyId = await this.resolveCompanyId(nextRole, nextCompanyId);
     }
 
     return this.prisma.user.update({
@@ -181,6 +209,7 @@ export class UsersService {
 
   async findMe(id: string) {
     const authUser = await this.findByIdForAuth(id);
+
     if (!authUser) {
       throw new UnauthorizedException('Usuário autenticado não encontrado.');
     }
@@ -204,12 +233,13 @@ export class UsersService {
   }
 
   private async resolveCompanyId(
-    role: CreateUserDto['role'],
-    inputCompanyId?: string,
-  ) {
+    role: Role,
+    inputCompanyId?: string | null,
+  ): Promise<string | null> {
     const companyId = String(inputCompanyId || '').trim();
+
     if (!companyId) {
-      if (role === 'ADMIN') {
+      if (role === Role.ADMIN) {
         return null;
       }
 
@@ -218,13 +248,23 @@ export class UsersService {
       );
     }
 
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { id: true },
-    });
-    if (!company) {
+    const companyExists = await this.companyExistsUnscoped(companyId);
+
+    if (!companyExists) {
       throw new BadRequestException('Empresa não encontrada.');
     }
-    return company.id;
+
+    return companyId;
+  }
+
+  private async companyExistsUnscoped(companyId: string): Promise<boolean> {
+    const rows = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id
+      FROM "Company"
+      WHERE id = ${companyId}
+      LIMIT 1
+    `;
+
+    return rows.length > 0;
   }
 }

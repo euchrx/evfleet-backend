@@ -28,7 +28,6 @@ export enum FuelTypeDto {
   GASOLINE = 'GASOLINE',
   ETHANOL = 'ETHANOL',
   DIESEL = 'DIESEL',
-  ARLA32 = 'ARLA32',
   FLEX = 'FLEX',
   ELECTRIC = 'ELECTRIC',
   HYBRID = 'HYBRID',
@@ -41,47 +40,67 @@ export enum VehicleStatusDto {
   SOLD = 'SOLD',
 }
 
+export enum AxleConfigurationDto {
+  SINGLE = 'SINGLE',
+  DUAL = 'DUAL',
+}
+
 export class CreateVehicleDto {
   @IsString()
   @Length(7, 8)
-  plate: string;
+  plate!: string;
 
   @IsString()
   @Length(1, 80)
-  model: string;
+  model!: string;
 
   @IsString()
   @Length(1, 80)
-  brand: string;
+  brand!: string;
 
   @IsInt()
   @Min(1900)
-  year: number;
+  year!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  fipeValue?: number;
 
   @IsEnum(VehicleTypeDto)
-  vehicleType: VehicleTypeDto;
+  vehicleType!: VehicleTypeDto;
 
   @IsEnum(VehicleCategoryDto)
-  category: VehicleCategoryDto;
+  category!: VehicleCategoryDto;
+
+  @IsInt()
+  @Min(1)
+  axleCount!: number;
+
+  @IsOptional()
+  @IsEnum(AxleConfigurationDto)
+  axleConfiguration?: AxleConfigurationDto;
 
   @IsString()
   @Length(8, 30)
-  chassis: string;
+  chassis!: string;
 
   @IsString()
   @Length(9, 20)
-  renavam: string;
+  renavam!: string;
 
   @IsOptional()
   @IsDateString()
   acquisitionDate?: string;
 
+  @IsOptional()
   @IsEnum(FuelTypeDto)
-  fuelType: FuelTypeDto;
+  fuelType?: FuelTypeDto;
 
+  @IsOptional()
   @IsNumber()
   @Min(1)
-  tankCapacity: number;
+  tankCapacity?: number;
 
   @IsOptional()
   @IsEnum(VehicleStatusDto)

@@ -39,8 +39,11 @@ export class BillingController {
   ) {}
 
   @Get('plans')
-  async getPlans() {
-    return this.billingService.listPlans();
+  async getPlans(@Req() req: any) {
+    const companyId =
+      (req?.companyScopeId as string | undefined) ||
+      (req?.user?.companyId as string | undefined);
+    return this.billingService.listPlans(companyId);
   }
 
   @Get('me/subscription')

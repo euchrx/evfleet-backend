@@ -23,8 +23,8 @@ async function resolveCompanyId() {
 
   const createdDefault = await prisma.company.create({
     data: {
-      name: 'Empresa Padrao',
-      slug: 'empresa-padrao',
+      name: 'EvSystem',
+      slug: 'ev-system',
       active: true,
     },
     select: { id: true },
@@ -35,8 +35,8 @@ async function resolveCompanyId() {
 }
 
 async function main() {
-  const email = (process.env.MASTER_ADMIN_EMAIL || 'admin@evfleet.com.br').trim();
-  const name = (process.env.MASTER_ADMIN_NAME || 'Master Admin').trim();
+  const email = (process.env.MASTER_ADMIN_EMAIL || 'christian@evsystem.com.br').trim();
+  const name = (process.env.MASTER_ADMIN_NAME || 'Christian').trim();
   const plainPassword = (process.env.MASTER_ADMIN_PASSWORD || '').trim();
 
   if (!plainPassword) {

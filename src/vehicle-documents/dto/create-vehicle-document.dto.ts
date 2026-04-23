@@ -13,7 +13,27 @@ export enum VehicleDocumentTypeDto {
   IPVA = 'IPVA',
   LEASING_CONTRACT = 'LEASING_CONTRACT',
   INSPECTION = 'INSPECTION',
+  CNH = 'CNH',
+  EAR = 'EAR',
+  MOPP = 'MOPP',
+  TOXICOLOGICAL_EXAM = 'TOXICOLOGICAL_EXAM',
+  EMPLOYMENT_RECORD = 'EMPLOYMENT_RECORD',
+  RG = 'RG',
+  CPF_DOCUMENT = 'CPF_DOCUMENT',
+  DEFENSIVE_DRIVING = 'DEFENSIVE_DRIVING',
+  TRUCAO_TRANSPORTE = 'TRUCAO_TRANSPORTE',
+  CRLV = 'CRLV',
+  CIV = 'CIV',
+  CIPP = 'CIPP',
+  ENVIRONMENTAL_AUTHORIZATION = 'ENVIRONMENTAL_AUTHORIZATION',
+  RNTRC = 'RNTRC',
   OTHER = 'OTHER',
+}
+
+export enum DocumentOwnerTypeDto {
+  VEHICLE = 'VEHICLE',
+  DRIVER = 'DRIVER',
+  GENERAL = 'GENERAL',
 }
 
 export enum DocumentStatusDto {
@@ -25,6 +45,10 @@ export enum DocumentStatusDto {
 export class CreateVehicleDocumentDto {
   @IsEnum(VehicleDocumentTypeDto)
   type: VehicleDocumentTypeDto;
+
+  @IsOptional()
+  @IsEnum(DocumentOwnerTypeDto)
+  ownerType?: DocumentOwnerTypeDto;
 
   @IsString()
   @Length(2, 140)
@@ -62,6 +86,11 @@ export class CreateVehicleDocumentDto {
   @Length(2, 300)
   fileUrl?: string;
 
+  @IsOptional()
   @IsUUID()
-  vehicleId: string;
+  vehicleId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  driverId?: string;
 }

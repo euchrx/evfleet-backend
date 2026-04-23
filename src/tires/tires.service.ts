@@ -31,6 +31,9 @@ export class TiresService {
           brand: dto.brand.trim(),
           model: dto.model.trim(),
           size: dto.size.trim(),
+          ...(dto.rim !== undefined
+            ? { rim: new Prisma.Decimal(dto.rim) }
+            : {}),
           ...(dto.purchaseDate !== undefined ? { purchaseDate: new Date(dto.purchaseDate) } : {}),
           ...(dto.purchaseCost !== undefined ? { purchaseCost: dto.purchaseCost } : {}),
           ...(dto.status !== undefined ? { status: dto.status } : {}),
@@ -88,6 +91,9 @@ export class TiresService {
         ...(dto.brand !== undefined ? { brand: dto.brand.trim() } : {}),
         ...(dto.model !== undefined ? { model: dto.model.trim() } : {}),
         ...(dto.size !== undefined ? { size: dto.size.trim() } : {}),
+        ...(dto.rim !== undefined
+          ? { rim: new Prisma.Decimal(dto.rim) }
+          : {}),
         ...(dto.purchaseDate !== undefined ? { purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : null } : {}),
         ...(dto.purchaseCost !== undefined ? { purchaseCost: dto.purchaseCost } : {}),
         ...(dto.status !== undefined ? { status: dto.status } : {}),
@@ -168,7 +174,10 @@ export class TiresService {
     const alerts = tires.flatMap((tire: any) => {
       const items: Array<{ type: string; severity: string; message: string }> = [];
 
-      if (typeof tire.currentTreadDepthMm === 'number' && tire.currentTreadDepthMm <= (tire.minTreadDepthMm ?? 3)) {
+      if (
+        typeof tire.currentTreadDepthMm === 'number' &&
+        tire.currentTreadDepthMm <= (tire.minTreadDepthMm ?? 3)
+      ) {
         items.push({
           type: 'TREAD',
           severity: 'HIGH',
@@ -176,14 +185,16 @@ export class TiresService {
         });
       }
 
-      if (typeof tire.currentPressurePsi === 'number' && typeof tire.targetPressurePsi === 'number' && tire.targetPressurePsi > 0) {
-        const min = tire.targetPressurePsi * 0.9;
-        const max = tire.targetPressurePsi * 1.1;
-        if (tire.currentPressurePsi < min || tire.currentPressurePsi > max) {
+      if (
+        typeof tire.currentPressurePsi === 'number' &&
+        typeof tire.targetPressurePsi === 'number'
+      ) {
+        const diff = Math.abs(tire.currentPressurePsi - tire.targetPressurePsi);
+        if (diff >= 8) {
           items.push({
             type: 'PRESSURE',
             severity: 'MEDIUM',
-            message: `Pressao fora da faixa (${tire.currentPressurePsi} PSI / alvo ${tire.targetPressurePsi} PSI).`,
+            message: `Pressao divergente da meta (${tire.currentPressurePsi} PSI / meta ${tire.targetPressurePsi} PSI).`,
           });
         }
       }
@@ -191,40 +202,40 @@ export class TiresService {
       return items.map((item) => ({
         tireId: tire.id,
         serialNumber: tire.serialNumber,
-        vehicle: tire.vehicle ? `${tire.vehicle.brand} ${tire.vehicle.model}` : 'Sem veiculo',
+        brand: tire.brand,
+        model: tire.model,
+        size: tire.size,
+        vehicle: tire.vehicle,
         ...item,
       }));
     });
 
-    return {
-      totalTires: tires.length,
-      totalAlerts: alerts.length,
-      alerts,
+    const summary = {
+      total: alerts.length,
+      high: alerts.filter((item) => item.severity === 'HIGH').length,
+      medium: alerts.filter((item) => item.severity === 'MEDIUM').length,
+      low: alerts.filter((item) => item.severity === 'LOW').length,
     };
+
+    return { summary, alerts };
   }
 
   private async ensureVehicleExists(vehicleId: string) {
-    const exists = await this.prisma.vehicle.findUnique({
-      where: { id: vehicleId },
-      select: { id: true },
-    });
-    if (!exists) throw new NotFoundException('Veiculo nao encontrado');
+    const vehicle = await this.prisma.vehicle.findUnique({ where: { id: vehicleId } });
+    if (!vehicle) {
+      throw new BadRequestException('Veiculo informado nao encontrado');
+    }
+    return vehicle;
   }
 
   private handlePrismaError(error: unknown): never {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2002') {
-        throw new BadRequestException('Ja existe um pneu com este numero de serie/DOT-TIN.');
-      }
-      if (error.code === 'P2003') {
-        throw new BadRequestException('Nao foi possivel vincular o pneu ao veiculo informado.');
-      }
-      if (error.code === 'P2022') {
-        throw new InternalServerErrorException(
-          'Banco de dados desatualizado para pneus. Execute as migracoes do backend.',
-        );
-      }
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw new BadRequestException('Ja existe um pneu com esse numero de serie.');
     }
-    throw error;
+
+    throw new InternalServerErrorException('Nao foi possivel salvar o pneu.');
   }
 }

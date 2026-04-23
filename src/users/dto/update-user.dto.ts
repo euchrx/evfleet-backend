@@ -1,4 +1,11 @@
-﻿import { IsEmail, IsEnum, IsOptional, IsString, Length } from 'class-validator';
+﻿import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+} from 'class-validator';
 import { Role } from './create-user.dto';
 
 export class UpdateUserDto {
@@ -19,4 +26,8 @@ export class UpdateUserDto {
   @IsOptional()
   @IsEnum(Role)
   role?: Role;
+
+  @IsOptional()
+  @IsUUID()
+  companyId?: string;
 }

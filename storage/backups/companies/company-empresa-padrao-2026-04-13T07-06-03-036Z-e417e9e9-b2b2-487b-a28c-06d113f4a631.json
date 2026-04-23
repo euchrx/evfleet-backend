@@ -1,0 +1,83 @@
+{
+  "metadata": {
+    "generatedAt": "2026-04-13T07:06:03.036Z",
+    "actorUserId": "2783b7e9-60d2-4f86-ae92-8995d51e17ae",
+    "companyId": "4010c44d-942b-4591-858b-79df98c7b94d",
+    "backupType": "company-delete-with-backup",
+    "storageDriver": "local-disk",
+    "missingRelations": []
+  },
+  "company": {
+    "id": "4010c44d-942b-4591-858b-79df98c7b94d",
+    "name": "Empresa Padrao",
+    "document": null,
+    "slug": "empresa-padrao",
+    "active": true,
+    "legalAcceptanceVersion": null,
+    "legalAcceptedAt": null,
+    "legalAcceptedByUserId": null,
+    "legalAcceptedByUserName": null,
+    "createdAt": "2026-04-13T07:00:49.047Z",
+    "updatedAt": "2026-04-13T07:00:49.047Z"
+  },
+  "branches": [],
+  "users": [
+    {
+      "id": "2783b7e9-60d2-4f86-ae92-8995d51e17ae",
+      "name": "Christian",
+      "email": "christian@evsystem.com.br",
+      "password": "$2b$10$7jARkM9aklJMmh6fpHYgDeF9inTVpgi6EcTCAhB4hRAzUxyGhLQkG",
+      "role": "ADMIN",
+      "createdAt": "2026-04-13T07:00:49.051Z",
+      "companyId": "4010c44d-942b-4591-858b-79df98c7b94d"
+    }
+  ],
+  "subscriptions": [
+    {
+      "id": "620d1671-b0e4-4ae5-8837-6e1ea56d6866",
+      "status": "ACTIVE",
+      "startedAt": "2026-04-13T07:05:22.108Z",
+      "currentPeriodStart": "2026-04-13T07:05:22.108Z",
+      "currentPeriodEnd": "2026-05-13T07:05:22.108Z",
+      "nextBillingAt": "2026-05-13T07:05:22.108Z",
+      "trialEndsAt": null,
+      "canceledAt": null,
+      "externalCustomerId": null,
+      "externalSubscriptionId": null,
+      "createdAt": "2026-04-13T07:05:22.114Z",
+      "updatedAt": "2026-04-13T07:05:22.114Z",
+      "companyId": "4010c44d-942b-4591-858b-79df98c7b94d",
+      "planId": "61fd22af-773b-4ca9-8185-cbe610b3bd27"
+    }
+  ],
+  "payments": [],
+  "webhookEvents": [],
+  "vehicles": [],
+  "vehicleProfilePhotos": [],
+  "vehicleChangeLogs": [],
+  "drivers": [],
+  "maintenanceRecords": [],
+  "maintenancePlans": [],
+  "debts": [],
+  "fuelRecords": [],
+  "trips": [],
+  "vehicleDocuments": [],
+  "tires": [],
+  "tireReadings": [],
+  "xmlImportBatches": [],
+  "xmlInvoices": [],
+  "xmlInvoiceItems": [],
+  "retailProductImports": [],
+  "retailProductImportItems": [],
+  "references": {
+    "branchIds": [],
+    "vehicleIds": [],
+    "tireIds": [],
+    "subscriptionIds": [
+      "620d1671-b0e4-4ae5-8837-6e1ea56d6866"
+    ],
+    "batchIds": [],
+    "invoiceIds": [],
+    "retailImportIds": []
+  }
+}

@@ -25,12 +25,27 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
   });
+
   app.enableShutdownHooks();
+
+  app.disable('etag');
+
+  app.use((req, res, next) => {
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+    next();
+  });
 
   const uploadsPath = join(process.cwd(), 'uploads');
   if (!existsSync(uploadsPath)) {
     mkdirSync(uploadsPath, { recursive: true });
   }
+
   app.useStaticAssets(uploadsPath, {
     prefix: '/uploads/',
   });

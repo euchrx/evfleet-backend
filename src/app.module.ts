@@ -29,6 +29,7 @@ import { UsersModule } from './users/users.module';
 import { VehicleDocumentsModule } from './vehicle-documents/vehicle-documents.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { XmlImportModule } from './xml-import/xml-import.module';
+import { TireMovementsModule } from './tire-movements/tire-movements.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { XmlImportModule } from './xml-import/xml-import.module';
     TripsModule,
     VehicleDocumentsModule,
     TiresModule,
+    TireMovementsModule,
     MenuVisibilityModule,
     SystemResetModule,
     SupportModule,
@@ -65,4 +67,4 @@ import { XmlImportModule } from './xml-import/xml-import.module';
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
-export class AppModule {}
+export class AppModule { }

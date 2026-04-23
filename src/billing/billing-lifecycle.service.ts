@@ -5,14 +5,22 @@ import { PrismaService } from '../prisma/prisma.service';
 @Injectable()
 export class BillingLifecycleService {
   private static readonly MIN_INTERVAL_MS = 60_000;
+  private static readonly DEFAULT_GRACE_DAYS = 5;
+
   private lastRunAtMs = 0;
 
   constructor(private readonly prisma: PrismaService) {}
 
   async processOverduePaymentsIfNeeded(now = new Date()) {
     const nowMs = now.getTime();
+
     if (nowMs - this.lastRunAtMs < BillingLifecycleService.MIN_INTERVAL_MS) {
-      return { skipped: true, expiredPayments: 0, subscriptionsPastDue: 0 };
+      return {
+        skipped: true,
+        expiredPayments: 0,
+        subscriptionsPastDue: 0,
+        subscriptionsBlocked: 0,
+      };
     }
 
     const result = await this.processOverduePayments(now);
@@ -20,18 +28,42 @@ export class BillingLifecycleService {
     return result;
   }
 
-  // Estrutura pronta para scheduler (@Cron) quando o módulo de agendamento for habilitado.
   async processOverduePayments(now = new Date()) {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const expiredTrialsResult = await tx.subscription.updateMany({
+      const expiredTrialSubscriptions = await tx.subscription.findMany({
         where: {
           status: SubscriptionStatus.TRIALING,
           trialEndsAt: { lt: now },
         },
-        data: {
-          status: SubscriptionStatus.PAST_DUE,
+        select: {
+          id: true,
+          trialEndsAt: true,
+          graceDays: true,
+          graceEndsAt: true,
         },
       });
+
+      let expiredTrialsCount = 0;
+
+      for (const subscription of expiredTrialSubscriptions) {
+        const graceEndsAt =
+          subscription.graceEndsAt ??
+          this.resolveGraceEndsAt(
+            subscription.trialEndsAt,
+            subscription.graceDays,
+          );
+
+        await tx.subscription.update({
+          where: { id: subscription.id },
+          data: {
+            status: SubscriptionStatus.PAST_DUE,
+            graceEndsAt,
+            accessBlockedAt: null,
+          },
+        });
+
+        expiredTrialsCount += 1;
+      }
 
       const expiredPaymentsResult = await tx.payment.updateMany({
         where: {
@@ -43,34 +75,107 @@ export class BillingLifecycleService {
         },
       });
 
-      const subscriptionsToUpdate = await tx.payment.findMany({
+      const subscriptionsToMarkPastDue = await tx.payment.findMany({
         where: {
           status: PaymentStatus.EXPIRED,
           subscription: {
-            status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING] },
+            status: {
+              in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING],
+            },
           },
         },
-        select: { subscriptionId: true },
+        select: {
+          subscriptionId: true,
+          subscription: {
+            select: {
+              id: true,
+              currentPeriodEnd: true,
+              nextBillingAt: true,
+              graceDays: true,
+              graceEndsAt: true,
+            },
+          },
+        },
         distinct: ['subscriptionId'],
       });
 
-      const subscriptionIds = subscriptionsToUpdate.map((item) => item.subscriptionId);
-      const pastDueResult =
-        subscriptionIds.length > 0
-          ? await tx.subscription.updateMany({
-              where: {
-                id: { in: subscriptionIds },
-                status: { in: [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING] },
-              },
-              data: { status: SubscriptionStatus.PAST_DUE },
-            })
-          : { count: 0 };
+      let subscriptionsPastDueCount = 0;
+
+      for (const item of subscriptionsToMarkPastDue) {
+        const subscription = item.subscription;
+        if (!subscription) continue;
+
+        const referenceDate =
+          subscription.currentPeriodEnd ?? subscription.nextBillingAt ?? now;
+
+        const graceEndsAt =
+          subscription.graceEndsAt ??
+          this.resolveGraceEndsAt(referenceDate, subscription.graceDays);
+
+        await tx.subscription.update({
+          where: { id: subscription.id },
+          data: {
+            status: SubscriptionStatus.PAST_DUE,
+            graceEndsAt,
+            accessBlockedAt: null,
+          },
+        });
+
+        subscriptionsPastDueCount += 1;
+      }
+
+      const subscriptionsToBlock = await tx.subscription.findMany({
+        where: {
+          status: SubscriptionStatus.PAST_DUE,
+          graceEndsAt: { lt: now },
+          OR: [
+            { accessBlockedAt: null },
+            { accessBlockedAt: undefined as never },
+          ],
+        },
+        select: { id: true },
+      });
+
+      let subscriptionsBlockedCount = 0;
+
+      if (subscriptionsToBlock.length > 0) {
+        const ids = subscriptionsToBlock.map((item) => item.id);
+
+        const blockResult = await tx.subscription.updateMany({
+          where: {
+            id: { in: ids },
+            status: SubscriptionStatus.PAST_DUE,
+          },
+          data: {
+            accessBlockedAt: now,
+          },
+        });
+
+        subscriptionsBlockedCount = blockResult.count;
+      }
 
       return {
         skipped: false,
         expiredPayments: expiredPaymentsResult.count,
-        subscriptionsPastDue: pastDueResult.count + expiredTrialsResult.count,
+        subscriptionsPastDue:
+          subscriptionsPastDueCount + expiredTrialsCount,
+        subscriptionsBlocked: subscriptionsBlockedCount,
       };
     });
+  }
+
+  private resolveGraceEndsAt(
+    referenceDate: Date | null,
+    graceDays?: number | null,
+  ) {
+    if (!referenceDate) return null;
+
+    const resolvedGraceDays =
+      graceDays ?? BillingLifecycleService.DEFAULT_GRACE_DAYS;
+
+    const graceEndsAt = new Date(referenceDate);
+    graceEndsAt.setDate(graceEndsAt.getDate() + resolvedGraceDays);
+
+    return graceEndsAt;
   }
 }

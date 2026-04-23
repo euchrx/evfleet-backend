@@ -82,17 +82,24 @@ export class PrismaService extends PrismaClient
       case 'Debt':
       case 'FuelRecord':
       case 'Trip':
-      case 'VehicleDocument':
       case 'VehicleChangeLog':
       case 'VehicleProfilePhoto':
         return { vehicle: { companyId } };
+      case 'VehicleDocument':
+        return { companyId };
       case 'Tire':
-        return { vehicle: { companyId } };
+        return {
+          OR: [
+            { vehicle: { companyId } },
+            { vehicleId: null },
+          ],
+        };
       case 'TireReading':
         return {
           OR: [
             { vehicle: { companyId } },
             { tire: { vehicle: { companyId } } },
+            { tire: { vehicleId: null } },
           ],
         };
       default:

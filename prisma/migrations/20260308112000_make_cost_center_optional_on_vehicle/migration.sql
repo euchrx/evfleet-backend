@@ -1,2 +1,0 @@
-ALTER TABLE "Vehicle"
-ALTER COLUMN "costCenterId" DROP NOT NULL;

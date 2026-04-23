@@ -12,6 +12,7 @@ import {
   Min,
 } from 'class-validator';
 import {
+  AxleConfigurationDto,
   FuelTypeDto,
   VehicleCategoryDto,
   VehicleStatusDto,
@@ -40,12 +41,26 @@ export class UpdateVehicleDto {
   year?: number;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  fipeValue?: number | null;
+
+  @IsOptional()
   @IsEnum(VehicleTypeDto)
   vehicleType?: VehicleTypeDto;
 
   @IsOptional()
   @IsEnum(VehicleCategoryDto)
   category?: VehicleCategoryDto;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  axleCount?: number;
+
+  @IsOptional()
+  @IsEnum(AxleConfigurationDto)
+  axleConfiguration?: AxleConfigurationDto;
 
   @IsOptional()
   @IsString()

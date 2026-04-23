@@ -1,16 +1,79 @@
-import { SubscriptionStatus } from '@prisma/client';
-import { IsIn, IsOptional, IsUUID } from 'class-validator';
+import { PlanInterval, SubscriptionStatus } from '@prisma/client';
+import {
+  IsBoolean,
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Min,
+} from 'class-validator';
 
 type CompanySubscriptionInitialStatus = Extract<
   SubscriptionStatus,
-  'TRIALING' | 'ACTIVE'
+  'DRAFT' | 'TRIALING' | 'ACTIVE'
 >;
 
 export class CreateCompanySubscriptionDto {
-  @IsUUID()
-  planId: string;
+  @IsString()
+  @Length(1, 191)
+  planId!: string;
 
   @IsOptional()
-  @IsIn(['TRIALING', 'ACTIVE'])
+  @IsIn(['DRAFT', 'TRIALING', 'ACTIVE'])
   initialStatus?: CompanySubscriptionInitialStatus;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  trialDays?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  graceDays?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  customPriceCents?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  customVehicleLimit?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isCustomConfiguration?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Length(2, 120)
+  planNameSnapshot?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(2, 40)
+  planCodeSnapshot?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  priceCentsSnapshot?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  vehicleLimitSnapshot?: number;
+
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  currencySnapshot?: string;
+
+  @IsOptional()
+  @IsEnum(PlanInterval)
+  intervalSnapshot?: PlanInterval;
 }

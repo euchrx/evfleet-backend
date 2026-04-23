@@ -6,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Min,
 } from 'class-validator';
@@ -46,4 +47,16 @@ export class CreatePlanDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isPublic?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isEnterprise?: boolean;
+
+  @IsOptional()
+  @IsUUID()
+  companyId?: string;
 }

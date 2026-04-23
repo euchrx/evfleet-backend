@@ -8,17 +8,19 @@ import {
 } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { AllowInadimplenteAccess } from './allow-inadimplente-access.decorator';
+import { AllowNoPlanAccess } from './allow-no-plan-access.decorator';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ResolveLoginProfileDto } from './dto/resolve-login-profile.dto';
 import { Public } from './public.decorator';
+
 
 @Controller(['auth', 'api/auth'])
 export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly users: UsersService,
-  ) {}
+  ) { }
 
   @Public()
   @Post('login')
@@ -33,6 +35,7 @@ export class AuthController {
   }
 
   @AllowInadimplenteAccess()
+  @AllowNoPlanAccess()
   @Get('me')
   async me(@Req() req: any) {
     const userId = String(req?.user?.userId || '').trim();

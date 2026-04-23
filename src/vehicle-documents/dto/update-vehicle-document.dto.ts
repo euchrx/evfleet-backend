@@ -6,12 +6,20 @@ import {
   IsUUID,
   Length,
 } from 'class-validator';
-import { DocumentStatusDto, VehicleDocumentTypeDto } from './create-vehicle-document.dto';
+import {
+  DocumentOwnerTypeDto,
+  DocumentStatusDto,
+  VehicleDocumentTypeDto,
+} from './create-vehicle-document.dto';
 
 export class UpdateVehicleDocumentDto {
   @IsOptional()
   @IsEnum(VehicleDocumentTypeDto)
   type?: VehicleDocumentTypeDto;
+
+  @IsOptional()
+  @IsEnum(DocumentOwnerTypeDto)
+  ownerType?: DocumentOwnerTypeDto;
 
   @IsOptional()
   @IsString()
@@ -53,4 +61,8 @@ export class UpdateVehicleDocumentDto {
   @IsOptional()
   @IsUUID()
   vehicleId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  driverId?: string;
 }

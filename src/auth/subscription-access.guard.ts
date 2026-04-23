@@ -6,11 +6,11 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { SubscriptionStatus } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
 import { BillingLifecycleService } from '../billing/billing-lifecycle.service';
-import { IS_PUBLIC_KEY } from './public.decorator';
-import { ALLOW_INADIMPLENTE_ACCESS_KEY } from './allow-inadimplente-access.decorator';
+import { BillingAccessService } from '../billing/billing-access.service';
+import { IS_PUBLIC_KEY } from 'src/auth/public.decorator';
+import { ALLOW_INADIMPLENTE_ACCESS_KEY } from 'src/auth/allow-inadimplente-access.decorator';
+import { ALLOW_NO_PLAN_ACCESS_KEY } from 'src/auth/allow-no-plan-access.decorator';
 
 @Injectable()
 export class SubscriptionAccessGuard implements CanActivate {
@@ -18,8 +18,8 @@ export class SubscriptionAccessGuard implements CanActivate {
 
   constructor(
     private readonly reflector: Reflector,
-    private readonly prisma: PrismaService,
     private readonly billingLifecycleService: BillingLifecycleService,
+    private readonly billingAccessService: BillingAccessService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -27,16 +27,19 @@ export class SubscriptionAccessGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+
     if (isPublic) return true;
 
     const allowInadimplenteAccess = this.reflector.getAllAndOverride<boolean>(
       ALLOW_INADIMPLENTE_ACCESS_KEY,
       [context.getHandler(), context.getClass()],
     );
-    if (allowInadimplenteAccess) return true;
 
-    // Mantém a assinatura atualizada mesmo sem scheduler.
-    // Em caso de falha, apenas registra log e segue para não quebrar autenticação.
+    const allowNoPlanAccess = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_NO_PLAN_ACCESS_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+
     try {
       await this.billingLifecycleService.processOverduePaymentsIfNeeded();
     } catch (error) {
@@ -48,32 +51,37 @@ export class SubscriptionAccessGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest();
-    const user = request?.user as { userId?: string; companyId?: string } | undefined;
+    const user = request?.user as
+      | { userId?: string; companyId?: string; role?: string }
+      | undefined;
+
     if (!user?.userId) return true;
+
+    const normalizedRole = String(user.role || '').trim().toUpperCase();
+
+    // ADMIN sempre livre do billing
+    if (normalizedRole === 'ADMIN') {
+      return true;
+    }
+
+    // Usuário sem empresa vinculada não entra na regra de billing aqui
     if (!user.companyId) return true;
 
-    const subscription = await this.prisma.subscription.findFirst({
-      where: {
-        companyId: user.companyId,
-        status: {
-          in: [
-            SubscriptionStatus.TRIALING,
-            SubscriptionStatus.ACTIVE,
-            SubscriptionStatus.PAST_DUE,
-            SubscriptionStatus.CANCELED,
-          ],
-        },
-      },
-      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
-      select: { status: true },
-    });
+    const access = await this.billingAccessService.getCompanyAccessStatus(
+      user.companyId,
+    );
 
-    if (!subscription) return true;
+    if (access.accessStatus === 'NO_PLAN') {
+      if (allowNoPlanAccess) return true;
 
-    if (
-      subscription.status === SubscriptionStatus.PAST_DUE ||
-      subscription.status === SubscriptionStatus.CANCELED
-    ) {
+      throw new ForbiddenException(
+        'Empresa sem plano configurado. Finalize a configuração comercial para liberar o uso do sistema.',
+      );
+    }
+
+    if (access.isBlocked) {
+      if (allowInadimplenteAccess) return true;
+
       throw new ForbiddenException(
         'Acesso bloqueado por inadimplência. Regularize sua assinatura para continuar.',
       );

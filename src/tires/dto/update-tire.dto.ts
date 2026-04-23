@@ -8,6 +8,7 @@ import {
   Length,
   Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { TireStatusDto } from './create-tire.dto';
 
 export class UpdateTireDto {
@@ -32,10 +33,17 @@ export class UpdateTireDto {
   size?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'O aro deve ser um número válido.' })
+  @Min(1)
+  rim?: number;
+
+  @IsOptional()
   @IsDateString()
   purchaseDate?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   purchaseCost?: number;
@@ -55,26 +63,31 @@ export class UpdateTireDto {
   wheelPosition?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   currentKm?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   currentTreadDepthMm?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   currentPressurePsi?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   targetPressurePsi?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   minTreadDepthMm?: number;

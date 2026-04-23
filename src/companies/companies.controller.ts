@@ -11,6 +11,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { AllowInadimplenteAccess } from '../auth/allow-inadimplente-access.decorator';
+import { AllowNoPlanAccess } from '../auth/allow-no-plan-access.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { CompaniesService } from './companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
@@ -29,6 +30,7 @@ export class CompaniesController {
 
   @Get('me')
   @AllowInadimplenteAccess()
+  @AllowNoPlanAccess()
   async findCurrent(@Req() req: any) {
     const role = String(req?.user?.role || '').trim().toUpperCase();
     const companyId = String(req?.user?.companyId || '').trim();

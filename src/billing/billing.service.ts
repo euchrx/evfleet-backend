@@ -63,9 +63,38 @@ export class BillingService {
     @Optional() private readonly configService?: ConfigService,
   ) {}
 
-  async listPlans() {
+  async listPlans(companyId?: string) {
+    const orderBy = [{ active: 'desc' as const }, { priceCents: 'asc' as const }];
+
+    if (!companyId?.trim()) {
+      return this.prisma.plan.findMany({
+        orderBy,
+        include: { company: { select: { id: true, name: true } } },
+      });
+    }
+
+    const normalizedCompanyId = companyId.trim();
+    const enterprisePlans = await this.prisma.plan.findMany({
+      where: {
+        active: true,
+        isEnterprise: true,
+        companyId: normalizedCompanyId,
+      },
+      orderBy,
+      include: { company: { select: { id: true, name: true } } },
+    });
+
+    if (enterprisePlans.length > 0) {
+      return enterprisePlans;
+    }
+
     return this.prisma.plan.findMany({
-      orderBy: [{ isActive: 'desc' }, { priceCents: 'asc' }],
+      where: {
+        active: true,
+        isPublic: true,
+      },
+      orderBy,
+      include: { company: { select: { id: true, name: true } } },
     });
   }
 
@@ -74,6 +103,8 @@ export class BillingService {
     const name = dto.name?.trim();
     const description = dto.description?.trim();
     const currency = (dto.currency?.trim() || 'BRL').toUpperCase();
+    const visibility = this.resolvePlanVisibility(dto.isPublic, dto.isEnterprise);
+    const companyId = dto.companyId?.trim() || null;
 
     if (!name) {
       throw new BadRequestException('Nome do plano é obrigatório.');
@@ -87,6 +118,12 @@ export class BillingService {
     if (dto.priceCents < this.getMinAmountCents()) {
       throw new BadRequestException(this.getMinAmountErrorMessage());
     }
+
+    await this.validatePlanCompanyAssignment({
+      companyId,
+      isPublic: visibility.isPublic,
+      isEnterprise: visibility.isEnterprise,
+    });
 
     const existingCode = await this.prisma.plan.findUnique({
       where: { code },
@@ -107,22 +144,15 @@ export class BillingService {
             dto.vehicleLimit !== undefined ? Number(dto.vehicleLimit) : null,
           currency,
           interval: dto.interval,
-          isActive: dto.active ?? true,
+          active: dto.active ?? true,
+          isPublic: visibility.isPublic,
+          isEnterprise: visibility.isEnterprise,
+          companyId,
         },
+        include: { company: { select: { id: true, name: true } } },
       });
 
-      return {
-        id: plan.id,
-        code: plan.code,
-        name: plan.name,
-        description: plan.description,
-        priceCents: plan.priceCents,
-        vehicleLimit: plan.vehicleLimit,
-        currency: plan.currency,
-        interval: plan.interval,
-        active: plan.isActive,
-        createdAt: plan.createdAt,
-      };
+      return this.mapPlanSummary(plan);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -137,7 +167,13 @@ export class BillingService {
   async updatePlan(planId: string, dto: UpdatePlanDto) {
     const existingPlan = await this.prisma.plan.findUnique({
       where: { id: planId },
-      select: { id: true, code: true },
+      select: {
+        id: true,
+        code: true,
+        isPublic: true,
+        isEnterprise: true,
+        companyId: true,
+      },
     });
 
     if (!existingPlan) {
@@ -148,6 +184,11 @@ export class BillingService {
     const name = dto.name?.trim();
     const description = dto.description?.trim();
     const currency = dto.currency?.trim().toUpperCase();
+    const visibility = this.resolvePlanVisibility(
+      dto.isPublic ?? existingPlan.isPublic,
+      dto.isEnterprise ?? existingPlan.isEnterprise,
+    );
+    const companyId = dto.companyId !== undefined ? dto.companyId?.trim() || null : existingPlan.companyId;
 
     if (dto.priceCents !== undefined) {
       if (!Number.isInteger(dto.priceCents) || dto.priceCents <= 0) {
@@ -157,6 +198,12 @@ export class BillingService {
         throw new BadRequestException(this.getMinAmountErrorMessage());
       }
     }
+
+    await this.validatePlanCompanyAssignment({
+      companyId,
+      isPublic: visibility.isPublic,
+      isEnterprise: visibility.isEnterprise,
+    });
 
     if (code && code !== existingPlan.code) {
       const codeInUse = await this.prisma.plan.findUnique({
@@ -181,23 +228,21 @@ export class BillingService {
             : {}),
           ...(currency !== undefined ? { currency } : {}),
           ...(dto.interval !== undefined ? { interval: dto.interval } : {}),
-          ...(dto.active !== undefined ? { isActive: dto.active } : {}),
+          ...(dto.active !== undefined ? { active: dto.active } : {}),
+          ...(dto.isPublic !== undefined || dto.isEnterprise !== undefined
+            ? {
+                isPublic: visibility.isPublic,
+                isEnterprise: visibility.isEnterprise,
+              }
+            : {}),
+          ...(dto.companyId !== undefined || companyId !== existingPlan.companyId
+            ? { companyId }
+            : {}),
         },
+        include: { company: { select: { id: true, name: true } } },
       });
 
-      return {
-        id: updated.id,
-        code: updated.code,
-        name: updated.name,
-        description: updated.description,
-        priceCents: updated.priceCents,
-        vehicleLimit: updated.vehicleLimit,
-        currency: updated.currency,
-        interval: updated.interval,
-        active: updated.isActive,
-        createdAt: updated.createdAt,
-        updatedAt: updated.updatedAt,
-      };
+      return this.mapPlanSummary(updated);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -212,36 +257,79 @@ export class BillingService {
   async deletePlan(planId: string) {
     const existingPlan = await this.prisma.plan.findUnique({
       where: { id: planId },
-      select: { id: true, name: true },
+      select: {
+        id: true,
+        name: true,
+        companyId: true,
+        subscriptions: {
+          select: {
+            id: true,
+            companyId: true,
+            status: true,
+          },
+        },
+      },
     });
 
     if (!existingPlan) {
       throw new NotFoundException('Plano não encontrado.');
     }
 
-    const hasLinkedSubscriptions = await this.prisma.subscription.count({
-      where: { planId },
+    const resetCompanyIds = Array.from(
+      new Set(
+        existingPlan.subscriptions
+          .map((subscription) => subscription.companyId)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      if (existingPlan.subscriptions.length > 0) {
+        const subscriptionIds = existingPlan.subscriptions.map((subscription) => subscription.id);
+
+        await tx.payment.deleteMany({
+          where: {
+            subscriptionId: { in: subscriptionIds },
+          },
+        });
+
+        await tx.webhookEvent.updateMany({
+          where: {
+            subscriptionId: { in: subscriptionIds },
+          },
+          data: {
+            subscriptionId: null,
+            companyId: null,
+          },
+        });
+
+        await tx.subscription.deleteMany({
+          where: {
+            id: { in: subscriptionIds },
+          },
+        });
+      }
+
+      await tx.plan.delete({ where: { id: planId } });
     });
 
-    if (hasLinkedSubscriptions > 0) {
-      const updated = await this.prisma.plan.update({
-        where: { id: planId },
-        data: { isActive: false },
-      });
-      return {
-        id: updated.id,
-        name: updated.name,
-        active: updated.isActive,
-        removed: false,
-        message: 'Plano desativado porque possui vínculos com assinaturas.',
-      };
-    }
-
-    await this.prisma.plan.delete({ where: { id: planId } });
-    return { id: planId, removed: true };
+    return {
+      id: existingPlan.id,
+      name: existingPlan.name,
+      removed: true,
+      resetCompanies: resetCompanyIds.map((companyId) => ({
+        companyId,
+        operationalStatus: 'NO_PLAN',
+      })),
+      message:
+        resetCompanyIds.length > 0
+          ? 'Plano removido com reset total das empresas vinculadas.'
+          : 'Plano removido com sucesso.',
+    };
   }
 
   async getCompanySubscription(companyId: string) {
+
     const subscription = await this.prisma.subscription.findFirst({
       where: { companyId },
       orderBy: { createdAt: 'desc' },
@@ -263,6 +351,9 @@ export class BillingService {
         priceCents: subscription.plan.priceCents,
         currency: subscription.plan.currency,
         interval: subscription.plan.interval,
+        isPublic: subscription.plan.isPublic,
+        isEnterprise: subscription.plan.isEnterprise,
+        companyId: subscription.plan.companyId,
       },
     };
   }
@@ -339,14 +430,24 @@ export class BillingService {
 
       const plan = await tx.plan.findUnique({
         where: { id: planId },
-        select: { id: true, code: true, name: true, isActive: true, interval: true },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          active: true,
+          interval: true,
+          isPublic: true,
+          isEnterprise: true,
+          companyId: true,
+        },
       });
       if (!plan) {
         throw new NotFoundException('Plano não encontrado.');
       }
-      if (!plan.isActive) {
+      if (!plan.active) {
         throw new BadRequestException('Plano inativo não pode ser utilizado.');
       }
+      this.assertPlanAvailabilityForCompany(companyId, plan);
 
       const resolvedInitialStatus = await this.resolveSubscriptionInitialStatus(
         tx,
@@ -517,7 +618,7 @@ export class BillingService {
             priceCents: true,
             currency: true,
             interval: true,
-            isActive: true,
+            active: true,
           },
         })
       : null;
@@ -526,7 +627,7 @@ export class BillingService {
       throw new NotFoundException('Plano não encontrado.');
     }
 
-    if (targetPlan && !targetPlan.isActive) {
+    if (targetPlan && !targetPlan.active) {
       throw new BadRequestException('Plano inativo não pode ser utilizado.');
     }
 
@@ -1743,15 +1844,122 @@ export class BillingService {
         priceCents: true,
         currency: true,
         interval: true,
-        isActive: true,
+        active: true,
       },
     });
 
-    if (!requestedPlan || !requestedPlan.isActive) {
+    if (!requestedPlan || !requestedPlan.active) {
       return fallbackPlan;
     }
 
     return requestedPlan;
+  }
+
+
+  private mapPlanSummary(plan: {
+    id: string;
+    code: string;
+    name: string;
+    description?: string | null;
+    priceCents: number;
+    vehicleLimit?: number | null;
+    currency: string;
+    interval: PlanInterval;
+    active: boolean;
+    isPublic: boolean;
+    isEnterprise: boolean;
+    createdAt: Date;
+    updatedAt?: Date;
+    companyId?: string | null;
+    company?: { id: string; name: string } | null;
+  }) {
+    return {
+      id: plan.id,
+      code: plan.code,
+      name: plan.name,
+      description: plan.description ?? null,
+      priceCents: plan.priceCents,
+      vehicleLimit: plan.vehicleLimit ?? null,
+      currency: plan.currency,
+      interval: plan.interval,
+      active: plan.active,
+      isPublic: plan.isPublic,
+      isEnterprise: plan.isEnterprise,
+      companyId: plan.companyId ?? null,
+      company: plan.company ?? null,
+      createdAt: plan.createdAt,
+      ...(plan.updatedAt ? { updatedAt: plan.updatedAt } : {}),
+    };
+  }
+
+  private resolvePlanVisibility(isPublic?: boolean, isEnterprise?: boolean) {
+    const resolvedIsPublic = isPublic ?? !isEnterprise;
+    const resolvedIsEnterprise = isEnterprise ?? !resolvedIsPublic;
+
+    if (resolvedIsPublic === resolvedIsEnterprise) {
+      throw new BadRequestException(
+        'Plano deve ser público ou enterprise, mas não ambos.',
+      );
+    }
+
+    return {
+      isPublic: resolvedIsPublic,
+      isEnterprise: resolvedIsEnterprise,
+    };
+  }
+
+  private async validatePlanCompanyAssignment(input: {
+    companyId: string | null;
+    isPublic: boolean;
+    isEnterprise: boolean;
+  }) {
+    if (input.isEnterprise && !input.companyId) {
+      throw new BadRequestException(
+        'Plano enterprise deve possuir companyId.',
+      );
+    }
+
+    if (input.isPublic && input.companyId) {
+      throw new BadRequestException(
+        'Plano público não pode possuir companyId.',
+      );
+    }
+
+    if (!input.companyId) {
+      return;
+    }
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: input.companyId },
+      select: { id: true },
+    });
+
+    if (!company) {
+      throw new NotFoundException('Empresa do plano não encontrada.');
+    }
+  }
+
+  private assertPlanAvailabilityForCompany(
+    companyId: string,
+    plan: {
+      id: string;
+      isPublic?: boolean | null;
+      isEnterprise?: boolean | null;
+      companyId?: string | null;
+    },
+  ) {
+    if (plan.isEnterprise) {
+      if (!plan.companyId || plan.companyId !== companyId) {
+        throw new ForbiddenException(
+          'Plano enterprise não está disponível para esta empresa.',
+        );
+      }
+      return;
+    }
+
+    if (!plan.isPublic) {
+      throw new ForbiddenException('Plano indisponível para esta empresa.');
+    }
   }
 
   private logWebhook(message: string, payload?: unknown, isError = false) {

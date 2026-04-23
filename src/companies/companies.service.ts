@@ -4,7 +4,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Prisma, SubscriptionStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompanyDeletionService } from './company-deletion.service';
@@ -26,8 +26,6 @@ export class CompaniesService {
     private readonly companyDeletionService: CompanyDeletionService,
   ) {}
 
-  private readonly TRIAL_DAYS = 15;
-
   async create(dto: CreateCompanyDto) {
     const normalizedName = dto.name?.trim();
     const normalizedSlug = dto.slug?.trim();
@@ -42,54 +40,21 @@ export class CompaniesService {
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        const activePlans = await tx.plan.findMany({
-          where: { isActive: true },
-          orderBy: [{ priceCents: 'asc' }, { createdAt: 'asc' }],
-          select: { id: true, code: true, name: true },
-        });
-        const defaultPlan =
-          activePlans.find((plan) => this.isStarterPlan(plan)) || activePlans[0];
-
-        if (!defaultPlan) {
-          throw new BadRequestException(
-            'Nenhum plano ativo encontrado. Cadastre e ative ao menos um plano antes de criar empresa.',
-          );
-        }
-
-        const createdCompany = await tx.company.create({
-          data: {
-            name: normalizedName,
-            document: normalizedDocument || null,
-            slug: normalizedSlug || null,
-            active: true,
-          },
-          select: {
-            id: true,
-            name: true,
-            document: true,
-            slug: true,
-            active: true,
-            createdAt: true,
-          },
-        });
-
-        const now = new Date();
-        const trialEndsAt = this.addDays(now, this.TRIAL_DAYS);
-        await tx.subscription.create({
-          data: {
-            companyId: createdCompany.id,
-            planId: defaultPlan.id,
-            status: SubscriptionStatus.TRIALING,
-            startedAt: now,
-            trialEndsAt,
-            currentPeriodStart: now,
-            currentPeriodEnd: trialEndsAt,
-            nextBillingAt: trialEndsAt,
-          },
-        });
-
-        return createdCompany;
+      return await this.prisma.company.create({
+        data: {
+          name: normalizedName,
+          document: normalizedDocument || null,
+          slug: normalizedSlug || null,
+          active: true,
+        },
+        select: {
+          id: true,
+          name: true,
+          document: true,
+          slug: true,
+          active: true,
+          createdAt: true,
+        },
       });
     } catch (error) {
       if (
@@ -387,19 +352,6 @@ export class CompaniesService {
     }
   }
 
-  private addDays(date: Date, days: number) {
-    const result = new Date(date);
-    result.setDate(result.getDate() + days);
-    return result;
-  }
-
-  private isStarterPlan(plan: { code?: string | null; name?: string | null }) {
-    const code = String(plan.code || '').trim().toUpperCase();
-    const name = String(plan.name || '').trim().toUpperCase();
-
-    return code === 'STA' || code === 'STARTER' || name.includes('STARTER');
-  }
-
   private buildBadRequestException(errorCode: string, message: string) {
     return new BadRequestException(this.buildErrorBody(errorCode, message));
   }
@@ -434,8 +386,8 @@ export class CompaniesService {
     }
 
     return (
-      'errorCode' in response &&
-      (response as { errorCode?: string }).errorCode === 'COMPANY_NOT_FOUND'
+      (response as Partial<CompanyDeletionErrorBody>).errorCode ===
+      'COMPANY_NOT_FOUND'
     );
   }
 }

@@ -1,0 +1,64 @@
+{
+  "metadata": {
+    "generatedAt": "2026-04-21T08:42:45.067Z",
+    "actorUserId": "fe903cc5-3b27-4407-b9a1-b3f11dbf7857",
+    "companyId": "352b8d29-db97-4a09-af6c-750d495fc653",
+    "backupType": "company-delete-with-backup",
+    "storageDriver": "local-disk",
+    "missingRelations": []
+  },
+  "company": {
+    "id": "352b8d29-db97-4a09-af6c-750d495fc653",
+    "name": "Empresa Padrao",
+    "document": null,
+    "slug": "empresa-padrao",
+    "active": true,
+    "legalAcceptanceVersion": null,
+    "legalAcceptedAt": null,
+    "legalAcceptedByUserId": null,
+    "legalAcceptedByUserName": null,
+    "createdAt": "2026-04-21T07:10:21.476Z",
+    "updatedAt": "2026-04-21T07:10:21.476Z"
+  },
+  "branches": [],
+  "users": [
+    {
+      "id": "fe903cc5-3b27-4407-b9a1-b3f11dbf7857",
+      "name": "Christian",
+      "email": "christian@evsystem.com.br",
+      "password": "$2b$10$YfGg1IDAEUV7OOL6jqp3UuNYFKeAgZcuVY9lX.srHsi0RMWfyK...",
+      "role": "ADMIN",
+      "createdAt": "2026-04-21T07:10:21.479Z",
+      "companyId": "352b8d29-db97-4a09-af6c-750d495fc653"
+    }
+  ],
+  "subscriptions": [],
+  "payments": [],
+  "webhookEvents": [],
+  "vehicles": [],
+  "vehicleProfilePhotos": [],
+  "vehicleChangeLogs": [],
+  "drivers": [],
+  "maintenanceRecords": [],
+  "maintenancePlans": [],
+  "debts": [],
+  "fuelRecords": [],
+  "trips": [],
+  "vehicleDocuments": [],
+  "tires": [],
+  "tireReadings": [],
+  "xmlImportBatches": [],
+  "xmlInvoices": [],
+  "xmlInvoiceItems": [],
+  "retailProductImports": [],
+  "retailProductImportItems": [],
+  "references": {
+    "branchIds": [],
+    "vehicleIds": [],
+    "tireIds": [],
+    "subscriptionIds": [],
+    "batchIds": [],
+    "invoiceIds": [],
+    "retailImportIds": []
+  }
+}

@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -17,6 +18,7 @@ import {
 import { VehiclesService } from './vehicles.service';
 import { CreateVehicleDto } from './dto/create-vehicle.dto';
 import { UpdateVehicleDto } from './dto/update-vehicle.dto';
+import { SyncVehicleImplementsDto } from './dto/sync-vehicle-implements.dto';
 import { Roles } from '../auth/roles.decorator';
 import { Public } from '../auth/public.decorator';
 import { FilesInterceptor } from '@nestjs/platform-express';
@@ -62,7 +64,12 @@ export class VehiclesController {
       }),
       fileFilter: (_, file, cb) => {
         const allowed = /\.(jpg|jpeg|png|webp|pdf|doc|docx)$/i.test(file.originalname || '');
-        if (!allowed) return cb(new BadRequestException('Formato de arquivo nao suportado'), false);
+        if (!allowed) {
+          return cb(
+            new BadRequestException('Formato de arquivo nao suportado'),
+            false,
+          );
+        }
         cb(null, true);
       },
     }),
@@ -70,8 +77,14 @@ export class VehiclesController {
   uploadFiles(@Param('kind') kind: string, @UploadedFiles() files: any[]) {
     const normalizedKind: UploadKind | null =
       kind === 'document' ? 'document' : kind === 'photo' ? 'photo' : null;
-    if (!normalizedKind) throw new BadRequestException('Tipo de upload invalido');
-    if (!files?.length) throw new BadRequestException('Nenhum arquivo enviado');
+
+    if (!normalizedKind) {
+      throw new BadRequestException('Tipo de upload invalido');
+    }
+
+    if (!files?.length) {
+      throw new BadRequestException('Nenhum arquivo enviado');
+    }
 
     const urls = files.map((file) => {
       const folder = normalizedKind === 'photo' ? 'photos' : 'documents';
@@ -91,18 +104,23 @@ export class VehiclesController {
         const allowed = /^(image\/jpeg|image\/jpg|image\/png|image\/webp)$/i.test(
           file.mimetype || '',
         );
+
         if (!allowed) {
           return cb(
             new BadRequestException('Formato de foto invalido. Use JPG, PNG ou WEBP.'),
             false,
           );
         }
+
         cb(null, true);
       },
     }),
   )
   uploadProfilePhoto(@Param('id') id: string, @UploadedFile() file?: any) {
-    if (!file) throw new BadRequestException('Nenhum arquivo enviado.');
+    if (!file) {
+      throw new BadRequestException('Nenhum arquivo enviado.');
+    }
+
     return this.service.uploadProfilePhoto(id, file);
   }
 
@@ -110,9 +128,14 @@ export class VehiclesController {
   @Get(':id/profile-photo')
   async getProfilePhoto(@Param('id') id: string, @Res() res: Response) {
     const photo = await this.service.getProfilePhoto(id);
+
     res.setHeader('Content-Type', photo.mimeType || 'application/octet-stream');
     res.setHeader('Cache-Control', 'public, max-age=300');
-    res.setHeader('Content-Disposition', `inline; filename="${photo.filename || 'vehicle-profile'}"`);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${photo.filename || 'vehicle-profile'}"`,
+    );
+
     res.send(photo.data);
   }
 
@@ -159,6 +182,23 @@ export class VehiclesController {
       page ? Number(page) : 1,
       limit ? Number(limit) : 10,
     );
+  }
+
+  @Get(':id/implements')
+  findLinkedImplements(@Param('id') id: string) {
+    return this.service.findLinkedImplements(id);
+  }
+
+  @Roles('ADMIN', 'FLEET_MANAGER')
+  @Put(':id/implements')
+  syncImplements(
+    @Param('id') id: string,
+    @Body() dto: SyncVehicleImplementsDto,
+    @Req() req: any,
+  ) {
+    return this.service.syncImplements(id, dto, {
+      actorUserId: req?.user?.userId,
+    });
   }
 
   @Roles('ADMIN', 'FLEET_MANAGER')
