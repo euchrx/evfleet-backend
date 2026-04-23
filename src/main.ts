@@ -27,7 +27,6 @@ async function bootstrap() {
   });
 
   app.enableShutdownHooks();
-
   app.disable('etag');
 
   app.use((req, res, next) => {
@@ -42,6 +41,7 @@ async function bootstrap() {
   });
 
   const uploadsPath = join(process.cwd(), 'uploads');
+
   if (!existsSync(uploadsPath)) {
     mkdirSync(uploadsPath, { recursive: true });
   }
@@ -57,8 +57,11 @@ async function bootstrap() {
 
   const defaultOrigins = [
     'http://localhost:5173',
+    'http://localhost:3000',
     'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000',
     'https://evfleet-frontend-rgke.vercel.app',
+    'https://evfleet-frontend.vercel.app',
     'https://evfleet-frontend-production.up.railway.app',
   ].map(normalizeOrigin);
 
@@ -87,29 +90,33 @@ async function bootstrap() {
         return;
       }
 
+      const incomingOrigin = normalizeOrigin(origin);
+
       if (allowedOrigins.has('*')) {
         callback(null, true);
         return;
       }
 
-      const incomingOrigin = normalizeOrigin(origin);
       const hostname = extractHostname(incomingOrigin);
+
       const isKnownHost =
         hostname.endsWith('.vercel.app') || hostname.endsWith('.railway.app');
+
       const matchesPattern = corsOriginPatterns.some((pattern) =>
         pattern.test(incomingOrigin),
       );
 
-      callback(
-        null,
-        allowedOrigins.has(incomingOrigin) || matchesPattern || isKnownHost,
-      );
+      const isAllowed =
+        allowedOrigins.has(incomingOrigin) || matchesPattern || isKnownHost;
+
+      callback(null, isAllowed);
     },
-    credentials: true,
+    credentials: false,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',
+      'x-company-id',
       'x-company-scope',
       'Accept',
       'Origin',
@@ -129,6 +136,7 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '0.0.0.0';
+
   await app.listen(port, host);
 }
 
