@@ -9,16 +9,16 @@
 
 */
 -- DropIndex
-DROP INDEX IF NOT EXISTS "Plan_isActive_idx";
+DROP INDEX IF EXISTS "Plan_isActive_idx";
 
 -- DropIndex
-DROP INDEX IF NOT EXISTS "Plan_isEnterprise_idx";
+DROP INDEX IF EXISTS "Plan_isEnterprise_idx";
 
 -- DropIndex
-DROP INDEX IF NOT EXISTS "Plan_isPublic_idx";
+DROP INDEX IF EXISTS "Plan_isPublic_idx";
 
 -- DropIndex
-DROP INDEX IF NOT EXISTS "Plan_sortOrder_idx";
+DROP INDEX IF EXISTS "Plan_sortOrder_idx";
 
 -- AlterTable
 ALTER TABLE "Plan" DROP COLUMN "allowsCustomPrice",
