@@ -9,22 +9,22 @@ import {
 export class CreateDriverDto {
   @IsString()
   @Length(2, 120)
-  name: string;
+  name!: string;
 
   @IsString()
   @Length(11, 11)
-  cpf: string;
+  cpf!: string;
 
   @IsString()
   @Length(5, 30)
-  cnh: string;
+  cnh!: string;
 
   @IsString()
   @Length(1, 5)
-  cnhCategory: string;
+  cnhCategory!: string;
 
   @IsDateString()
-  cnhExpiresAt: string;
+  cnhExpiresAt!: string;
 
   @IsOptional()
   @IsString()
@@ -33,8 +33,12 @@ export class CreateDriverDto {
 
   @IsString()
   @Length(2, 30)
-  status: string;
+  status!: string;
 
-  @IsUUID()
-  vehicleId: string;
+  @IsUUID('4', { message: 'companyId inválido.' })
+  companyId!: string;
+
+  @IsOptional()
+  @IsUUID('4', { message: 'vehicleId inválido.' })
+  vehicleId?: string | null;
 }

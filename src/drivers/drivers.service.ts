@@ -38,9 +38,15 @@ export class DriversService {
 
   async create(dto: CreateDriverDto) {
     const prisma = this.prisma as any;
-    const vehicle = dto.vehicleId
-      ? await this.ensureVehicleExists(dto.vehicleId)
-      : null;
+    const companyId = dto.companyId;
+
+    if (!companyId) {
+      throw new BadRequestException('Empresa não identificada para cadastrar o motorista.');
+    }
+
+    if (dto.vehicleId) {
+      await this.ensureVehicleBelongsToCompany(dto.vehicleId, companyId);
+    }
 
     try {
       return await prisma.$transaction(async (tx: any) => {
@@ -53,24 +59,23 @@ export class DriversService {
             cnhExpiresAt: new Date(dto.cnhExpiresAt),
             phone: dto.phone ?? null,
             status: dto.status,
-            vehicleId: dto.vehicleId ?? null,
+            companyId,
+            vehicleId: dto.vehicleId || null,
           },
           include: this.includeVehicle,
         });
 
-        if (vehicle?.companyId) {
-          await this.ensureDefaultDriverDocuments(tx, {
-            driverId: driver.id,
-            companyId: vehicle.companyId,
-          });
+        await this.ensureDefaultDriverDocuments(tx, {
+          driverId: driver.id,
+          companyId,
+        });
 
-          await this.syncDriverCnhDocument(tx, {
-            driverId: driver.id,
-            companyId: vehicle.companyId,
-            cnh: driver.cnh,
-            cnhExpiresAt: driver.cnhExpiresAt,
-          });
-        }
+        await this.syncDriverCnhDocument(tx, {
+          driverId: driver.id,
+          companyId,
+          cnh: driver.cnh,
+          cnhExpiresAt: driver.cnhExpiresAt,
+        });
 
         return driver;
       });
@@ -82,6 +87,7 @@ export class DriversService {
 
   async findAll() {
     const prisma = this.prisma as any;
+
     return prisma.driver.findMany({
       orderBy: { createdAt: 'desc' },
       include: this.includeVehicle,
@@ -90,12 +96,14 @@ export class DriversService {
 
   async findOne(id: string) {
     const prisma = this.prisma as any;
+
     const driver = await prisma.driver.findUnique({
       where: { id },
       include: this.includeVehicle,
     });
 
     if (!driver) throw new NotFoundException('Motorista nao encontrado');
+
     return driver;
   }
 
@@ -107,9 +115,15 @@ export class DriversService {
       throw new BadRequestException('Envie ao menos um campo para atualizar.');
     }
 
-    const nextVehicleId =
-      dto.vehicleId !== undefined ? dto.vehicleId : (existingDriver.vehicleId ?? undefined);
-    const vehicle = nextVehicleId ? await this.ensureVehicleExists(nextVehicleId) : null;
+    const companyId = dto.companyId || existingDriver.companyId;
+
+    if (!companyId) {
+      throw new BadRequestException('Empresa não identificada para atualizar o motorista.');
+    }
+
+    if (dto.vehicleId) {
+      await this.ensureVehicleBelongsToCompany(dto.vehicleId, companyId);
+    }
 
     try {
       return await prisma.$transaction(async (tx: any) => {
@@ -125,24 +139,23 @@ export class DriversService {
               : {}),
             ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
             ...(dto.status !== undefined ? { status: dto.status } : {}),
-            ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
+            ...(dto.companyId !== undefined ? { companyId: dto.companyId } : {}),
+            ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId || null } : {}),
           },
           include: this.includeVehicle,
         });
 
-        if (vehicle?.companyId) {
-          await this.ensureDefaultDriverDocuments(tx, {
-            driverId: driver.id,
-            companyId: vehicle.companyId,
-          });
+        await this.ensureDefaultDriverDocuments(tx, {
+          driverId: driver.id,
+          companyId,
+        });
 
-          await this.syncDriverCnhDocument(tx, {
-            driverId: driver.id,
-            companyId: vehicle.companyId,
-            cnh: driver.cnh,
-            cnhExpiresAt: driver.cnhExpiresAt,
-          });
-        }
+        await this.syncDriverCnhDocument(tx, {
+          driverId: driver.id,
+          companyId,
+          cnh: driver.cnh,
+          cnhExpiresAt: driver.cnhExpiresAt,
+        });
 
         return driver;
       });
@@ -154,21 +167,27 @@ export class DriversService {
 
   async remove(id: string) {
     const prisma = this.prisma as any;
+
     await this.findOne(id);
     await prisma.driver.delete({ where: { id } });
+
     return { message: 'Motorista removido com sucesso' };
   }
 
-  private async ensureVehicleExists(vehicleId: string) {
-    const exists = await this.prisma.vehicle.findUnique({
+  private async ensureVehicleBelongsToCompany(vehicleId: string, companyId: string) {
+    const vehicle = await this.prisma.vehicle.findUnique({
       where: { id: vehicleId },
       select: { id: true, companyId: true },
     });
 
-    if (!exists) throw new NotFoundException('Veiculo nao encontrado');
-    return exists;
-  }
+    if (!vehicle) throw new NotFoundException('Veiculo nao encontrado');
 
+    if (vehicle.companyId !== companyId) {
+      throw new BadRequestException('O veículo informado não pertence à empresa do motorista.');
+    }
+
+    return vehicle;
+  }
 
   private async ensureDefaultDriverDocuments(
     tx: any,
@@ -255,6 +274,7 @@ export class DriversService {
           notes: existing.notes ?? null,
         },
       });
+
       return;
     }
 
@@ -276,6 +296,7 @@ export class DriversService {
     if (target.includes('cpf')) {
       throw new ConflictException('CPF já cadastrado.');
     }
+
     if (target.includes('cnh')) {
       throw new ConflictException('CNH já cadastrada.');
     }

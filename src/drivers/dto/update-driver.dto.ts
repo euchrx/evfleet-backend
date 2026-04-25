@@ -36,6 +36,10 @@ export class UpdateDriverDto {
   status?: string;
 
   @IsOptional()
-  @IsUUID()
-  vehicleId?: string;
+  @IsUUID('4', { message: 'companyId inválido.' })
+  companyId?: string;
+
+  @IsOptional()
+  @IsUUID('4', { message: 'vehicleId inválido.' })
+  vehicleId?: string | null;
 }

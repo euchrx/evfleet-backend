@@ -27,6 +27,7 @@ model Company {
   plans                Plan[]
   branches             Branch[]
   vehicles             Vehicle[]
+  drivers              Driver[]
   users                User[]
   subscriptions        Subscription[]
   payments             Payment[]
@@ -201,8 +202,12 @@ model Driver {
   status       String
   createdAt    DateTime @default(now())
 
-  vehicleId   String?
-  vehicle     Vehicle?          @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+
   fuelRecords FuelRecord[]
   trips       Trip[]
   documents   VehicleDocument[]
@@ -651,29 +656,29 @@ enum AxleConfiguration {
 }
 
 model Plan {
-  id              String         @id @default(cuid())
-  code            String         @unique
-  name            String
-  description     String?
-  priceCents      Int
-  currency        String         @default("BRL")
-  interval        PlanInterval
-  active          Boolean        @default(true)
-  isPublic        Boolean        @default(true)
-  isEnterprise    Boolean        @default(false)
-  companyId       String?
-  vehicleLimit    Int?
-  userLimit       Int?
-  trialDays       Int?
-  features        Json?
-  highlightLabel  String?
-  ctaLabel        String?
-  sortOrder       Int            @default(0)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id             String       @id @default(cuid())
+  code           String       @unique
+  name           String
+  description    String?
+  priceCents     Int
+  currency       String       @default("BRL")
+  interval       PlanInterval
+  active         Boolean      @default(true)
+  isPublic       Boolean      @default(true)
+  isEnterprise   Boolean      @default(false)
+  companyId      String?
+  vehicleLimit   Int?
+  userLimit      Int?
+  trialDays      Int?
+  features       Json?
+  highlightLabel String?
+  ctaLabel       String?
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  company         Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  subscriptions   Subscription[]
+  company       Company?       @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  subscriptions Subscription[]
 
   @@index([active])
   @@index([companyId])
@@ -682,39 +687,39 @@ model Plan {
 }
 
 model Subscription {
-  id                     String             @id @default(uuid())
-  status                 SubscriptionStatus @default(DRAFT)
+  id     String             @id @default(uuid())
+  status SubscriptionStatus @default(DRAFT)
 
-  startedAt              DateTime           @default(now())
-  currentPeriodStart     DateTime?
-  currentPeriodEnd       DateTime?
-  nextBillingAt          DateTime?
-  trialEndsAt            DateTime?
-  canceledAt             DateTime?
+  startedAt          DateTime  @default(now())
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  nextBillingAt      DateTime?
+  trialEndsAt        DateTime?
+  canceledAt         DateTime?
 
   // Configuração comercial da assinatura
-  trialDays              Int?
-  graceDays              Int?               @default(5)
-  customPriceCents       Int?
-  customVehicleLimit     Int?
+  trialDays          Int?
+  graceDays          Int? @default(5)
+  customPriceCents   Int?
+  customVehicleLimit Int?
 
   // Snapshot comercial do plano no momento da contratação
-  planNameSnapshot       String?
-  planCodeSnapshot       String?
-  priceCentsSnapshot     Int?
-  vehicleLimitSnapshot   Int?
-  currencySnapshot       String?
-  intervalSnapshot       PlanInterval?
+  planNameSnapshot     String?
+  planCodeSnapshot     String?
+  priceCentsSnapshot   Int?
+  vehicleLimitSnapshot Int?
+  currencySnapshot     String?
+  intervalSnapshot     PlanInterval?
 
   // Controle operacional
-  graceEndsAt            DateTime?
-  accessBlockedAt        DateTime?
-  isCustomConfiguration  Boolean            @default(false)
+  graceEndsAt           DateTime?
+  accessBlockedAt       DateTime?
+  isCustomConfiguration Boolean   @default(false)
 
   externalCustomerId     String?
   externalSubscriptionId String?
-  createdAt              DateTime           @default(now())
-  updatedAt              DateTime           @updatedAt
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
