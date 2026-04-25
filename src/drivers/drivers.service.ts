@@ -11,7 +11,7 @@ import { UpdateDriverDto } from './dto/update-driver.dto';
 
 @Injectable()
 export class DriversService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   private static readonly AUTO_CNH_ISSUER = 'DETRAN';
 
@@ -19,13 +19,10 @@ export class DriversService {
     type: DocumentType;
     name: string;
   }> = [
-    { type: DocumentType.CNH, name: 'CNH' },
-    { type: DocumentType.EAR, name: 'EAR' },
-    { type: DocumentType.TOXICOLOGICAL_EXAM, name: 'Exame toxicológico' },
-    { type: DocumentType.RG, name: 'RG' },
-    { type: DocumentType.CPF_DOCUMENT, name: 'CPF' },
-    { type: DocumentType.EMPLOYMENT_RECORD, name: 'Ficha de registro' },
-  ];
+      { type: DocumentType.CNH, name: 'CNH' },
+      { type: DocumentType.MOPP, name: 'MOPP' },
+      { type: DocumentType.TOXICOLOGICAL_EXAM, name: 'Exame toxicológico' },
+    ];
 
   private readonly includeVehicle = {
     vehicle: {

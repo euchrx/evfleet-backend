@@ -4,9 +4,11 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
+import { AddTripProductDto } from './dto/add-trip-product.dto';
 
 @Injectable()
 export class TripsService {
@@ -23,137 +25,142 @@ export class TripsService {
     driver: true,
   } as const;
 
-  private async hydrateTrips<
-    T extends {
-      id: string;
-      vehicleId: string;
-      driverId?: string | null;
+  private readonly includeListRelations = {
+    vehicle: {
+      include: {
+        branch: true,
+      },
     },
-  >(trips: T[]) {
-    if (trips.length === 0) return [];
+    driver: true,
+    products: {
+      include: {
+        dangerousProduct: true,
+      },
+    },
+  } as const;
 
-    const vehicleIds = Array.from(new Set(trips.map((trip) => trip.vehicleId).filter(Boolean)));
-    const driverIds = Array.from(
-      new Set(
-        trips
-          .map((trip) => trip.driverId)
-          .filter((driverId): driverId is string => Boolean(driverId)),
-      ),
-    );
-
-    const [vehicles, drivers] = await Promise.all([
-      this.prisma.vehicle.findMany({
-        where: { id: { in: vehicleIds } },
-        include: { branch: true },
-      }),
-      driverIds.length
-        ? this.prisma.driver.findMany({
-            where: { id: { in: driverIds } },
-          })
-        : Promise.resolve([]),
-    ]);
-
-    const vehicleMap = new Map<string, (typeof vehicles)[number]>(
-      vehicles.map((vehicle) => [vehicle.id, vehicle] as const),
-    );
-    const driverMap = new Map<string, (typeof drivers)[number]>(
-      drivers.map((driver) => [driver.id, driver] as const),
-    );
-
-    const validTrips = trips
-      .map((trip) => {
-        const vehicle = vehicleMap.get(trip.vehicleId);
-        if (!vehicle) {
-          this.logger.warn(
-            `Viagem ${trip.id} ignorada porque o veiculo ${trip.vehicleId} nao foi encontrado no escopo atual.`,
-          );
-          return null;
-        }
-
-        return {
-          ...trip,
-          vehicle,
-          driver: trip.driverId ? driverMap.get(trip.driverId) ?? null : null,
-        };
-      })
-      .filter((trip): trip is NonNullable<typeof trip> => Boolean(trip));
-
-    return validTrips;
-  }
+  private readonly includeDetailsRelations = {
+    vehicle: {
+      include: {
+        branch: true,
+      },
+    },
+    driver: true,
+    products: {
+      include: {
+        dangerousProduct: true,
+      },
+    },
+    complianceChecks: {
+      orderBy: {
+        checkedAt: 'desc',
+      },
+      include: {
+        results: true,
+      },
+    },
+    generatedDocuments: {
+      orderBy: {
+        createdAt: 'desc',
+      },
+    },
+  } as const;
 
   async create(dto: CreateTripDto) {
     await this.ensureVehicleExists(dto.vehicleId);
     if (dto.driverId) await this.ensureDriverExists(dto.driverId);
 
-    const created = await (this.prisma as any).trip.create({
+    const created = await this.prisma.trip.create({
       data: {
         origin: dto.origin,
         destination: dto.destination,
-        ...(dto.reason !== undefined ? { reason: dto.reason } : {}),
+        reason: dto.reason ?? null,
         departureKm: Math.round(dto.departureKm),
-        ...(dto.returnKm !== undefined ? { returnKm: Math.round(dto.returnKm) } : {}),
+        returnKm:
+          dto.returnKm !== undefined ? Math.round(dto.returnKm) : undefined,
         departureAt: new Date(dto.departureAt),
-        ...(dto.returnAt !== undefined ? { returnAt: new Date(dto.returnAt) } : {}),
-        status: dto.status ?? 'OPEN',
+        returnAt: dto.returnAt ? new Date(dto.returnAt) : undefined,
+        status: 'PENDING_COMPLIANCE',
+        notes: dto.notes ?? null,
         vehicleId: dto.vehicleId,
-        ...(dto.driverId !== undefined ? { driverId: dto.driverId } : {}),
+        driverId: dto.driverId ?? null,
       },
-      include: this.includeRelations,
+      include: this.includeDetailsRelations,
     });
 
-    await this.updateVehicleKm(created.vehicleId, created.returnKm ?? created.departureKm);
+    await this.updateVehicleKm(
+      created.vehicleId,
+      created.returnKm ?? created.departureKm,
+    );
+
     return created;
   }
 
   async findAll() {
-    const trips = await (this.prisma as any).trip.findMany({
-      orderBy: { departureAt: 'desc' },
+    return this.prisma.trip.findMany({
+      orderBy: {
+        departureAt: 'desc',
+      },
+      include: this.includeListRelations,
     });
-
-    return this.hydrateTrips(trips);
   }
 
   async findOne(id: string) {
-    const trip = await (this.prisma as any).trip.findUnique({
+    const trip = await this.prisma.trip.findUnique({
       where: { id },
+      include: this.includeDetailsRelations,
     });
-    if (!trip) throw new NotFoundException('Viagem nao encontrada');
 
-    const [hydratedTrip] = await this.hydrateTrips([trip]);
-    if (!hydratedTrip) {
-      throw new NotFoundException('Viagem nao encontrada no escopo atual.');
+    if (!trip) {
+      throw new NotFoundException('Viagem nao encontrada');
     }
 
-    return hydratedTrip;
+    return trip;
   }
 
   async update(id: string, dto: UpdateTripDto) {
     const previous = await this.findOne(id);
+
     if (!dto || Object.keys(dto).length === 0) {
-      throw new BadRequestException('Envie ao menos um campo para atualizar.');
+      throw new BadRequestException('Envie dados para atualizar.');
     }
 
     if (dto.vehicleId) await this.ensureVehicleExists(dto.vehicleId);
     if (dto.driverId) await this.ensureDriverExists(dto.driverId);
 
-    const updated = await (this.prisma as any).trip.update({
+    const updated = await this.prisma.trip.update({
       where: { id },
       data: {
         ...(dto.origin !== undefined ? { origin: dto.origin } : {}),
-        ...(dto.destination !== undefined ? { destination: dto.destination } : {}),
-        ...(dto.reason !== undefined ? { reason: dto.reason } : {}),
-        ...(dto.departureKm !== undefined ? { departureKm: Math.round(dto.departureKm) } : {}),
-        ...(dto.returnKm !== undefined ? { returnKm: Math.round(dto.returnKm) } : {}),
-        ...(dto.departureAt !== undefined ? { departureAt: new Date(dto.departureAt) } : {}),
-        ...(dto.returnAt !== undefined ? { returnAt: new Date(dto.returnAt) } : {}),
+        ...(dto.destination !== undefined
+          ? { destination: dto.destination }
+          : {}),
+        ...(dto.reason !== undefined ? { reason: dto.reason || null } : {}),
+        ...(dto.departureKm !== undefined
+          ? { departureKm: Math.round(dto.departureKm) }
+          : {}),
+        ...(dto.returnKm !== undefined
+          ? { returnKm: Math.round(dto.returnKm) }
+          : {}),
+        ...(dto.departureAt !== undefined
+          ? { departureAt: new Date(dto.departureAt) }
+          : {}),
+        ...(dto.returnAt !== undefined
+          ? { returnAt: dto.returnAt ? new Date(dto.returnAt) : null }
+          : {}),
         ...(dto.status !== undefined ? { status: dto.status } : {}),
+        ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}),
         ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
-        ...(dto.driverId !== undefined ? { driverId: dto.driverId } : {}),
+        ...(dto.driverId !== undefined ? { driverId: dto.driverId || null } : {}),
       },
-      include: this.includeRelations,
+      include: this.includeDetailsRelations,
     });
 
-    await this.updateVehicleKm(updated.vehicleId, updated.returnKm ?? updated.departureKm);
+    await this.updateVehicleKm(
+      updated.vehicleId,
+      updated.returnKm ?? updated.departureKm,
+    );
+
     if (previous.vehicleId !== updated.vehicleId) {
       await this.recalculateVehicleKm(previous.vehicleId);
     }
@@ -163,9 +170,118 @@ export class TripsService {
 
   async remove(id: string) {
     const trip = await this.findOne(id);
-    await (this.prisma as any).trip.delete({ where: { id } });
+
+    await this.prisma.trip.delete({
+      where: { id },
+    });
+
     await this.recalculateVehicleKm(trip.vehicleId);
+
     return { message: 'Viagem removida com sucesso' };
+  }
+
+  async startTrip(id: string) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id },
+      include: {
+        complianceChecks: {
+          orderBy: {
+            checkedAt: 'desc',
+          },
+          take: 1,
+        },
+        generatedDocuments: true,
+      },
+    });
+
+    if (!trip) {
+      throw new NotFoundException('Viagem nao encontrada');
+    }
+
+    const lastCompliance = trip.complianceChecks[0];
+
+    if (!lastCompliance || lastCompliance.status !== 'APPROVED') {
+      throw new BadRequestException(
+        'Viagem nao aprovada no compliance. Valide a viagem antes de iniciar.',
+      );
+    }
+
+    const hasMdfe = trip.generatedDocuments.some(
+      (document) =>
+        document.type === 'MDFE_MOCK' &&
+        ['GENERATED', 'SENT'].includes(document.status),
+    );
+
+    if (!hasMdfe) {
+      throw new BadRequestException('MDF-e nao gerado para a viagem.');
+    }
+
+    return this.prisma.trip.update({
+      where: { id },
+      data: {
+        status: 'IN_PROGRESS',
+      },
+      include: this.includeDetailsRelations,
+    });
+  }
+
+  async addProduct(tripId: string, dto: AddTripProductDto) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+    });
+
+    if (!trip) {
+      throw new NotFoundException('Viagem nao encontrada');
+    }
+
+    const product = await this.prisma.dangerousProduct.findUnique({
+      where: { id: dto.dangerousProductId },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Produto perigoso nao encontrado');
+    }
+
+    return this.prisma.tripProduct.create({
+      data: {
+        tripId,
+        dangerousProductId: dto.dangerousProductId,
+        quantity: new Prisma.Decimal(dto.quantity),
+        unit: dto.unit,
+        tankCompartment: dto.tankCompartment ?? null,
+        invoiceKey: dto.invoiceKey ?? null,
+        invoiceNumber: dto.invoiceNumber ?? null,
+      },
+      include: {
+        dangerousProduct: true,
+      },
+    });
+  }
+
+  async findProducts(tripId: string) {
+    return this.prisma.tripProduct.findMany({
+      where: { tripId },
+      include: {
+        dangerousProduct: true,
+      },
+    });
+  }
+
+  async removeProduct(tripId: string, tripProductId: string) {
+    const item = await this.prisma.tripProduct.findFirst({
+      where: {
+        id: tripProductId,
+        tripId,
+      },
+    });
+
+    if (!item) {
+      throw new NotFoundException('Produto da viagem nao encontrado');
+    }
+
+    return this.prisma.tripProduct.delete({
+      where: { id: tripProductId },
+    });
   }
 
   private async ensureVehicleExists(vehicleId: string) {
@@ -173,7 +289,10 @@ export class TripsService {
       where: { id: vehicleId },
       select: { id: true },
     });
-    if (!exists) throw new NotFoundException('Veiculo nao encontrado');
+
+    if (!exists) {
+      throw new NotFoundException('Veiculo nao encontrado');
+    }
   }
 
   private async ensureDriverExists(driverId: string) {
@@ -181,7 +300,10 @@ export class TripsService {
       where: { id: driverId },
       select: { id: true },
     });
-    if (!exists) throw new NotFoundException('Motorista nao encontrado');
+
+    if (!exists) {
+      throw new NotFoundException('Motorista nao encontrado');
+    }
   }
 
   private async updateVehicleKm(vehicleId: string, km: number) {
@@ -189,6 +311,7 @@ export class TripsService {
       where: { id: vehicleId },
       select: { currentKm: true },
     });
+
     if (!vehicle) return;
     if (km <= vehicle.currentKm) return;
 
@@ -200,25 +323,33 @@ export class TripsService {
 
   private async recalculateVehicleKm(vehicleId: string) {
     const [lastFuel, lastMaintenance, lastTrip] = await Promise.all([
-      (this.prisma as any).fuelRecord.findFirst({
+      this.prisma.fuelRecord.findFirst({
         where: { vehicleId },
         orderBy: { km: 'desc' },
         select: { km: true },
       }),
-      (this.prisma as any).maintenanceRecord.findFirst({
+      this.prisma.maintenanceRecord.findFirst({
         where: { vehicleId },
         orderBy: { km: 'desc' },
         select: { km: true },
       }),
-      (this.prisma as any).trip.findFirst({
+      this.prisma.trip.findFirst({
         where: { vehicleId },
         orderBy: { returnKm: 'desc' },
         select: { departureKm: true, returnKm: true },
       }),
     ]);
 
-    const tripKm = Math.max(lastTrip?.returnKm ?? 0, lastTrip?.departureKm ?? 0);
-    const nextKm = Math.max(lastFuel?.km ?? 0, lastMaintenance?.km ?? 0, tripKm);
+    const tripKm = Math.max(
+      lastTrip?.returnKm ?? 0,
+      lastTrip?.departureKm ?? 0,
+    );
+
+    const nextKm = Math.max(
+      lastFuel?.km ?? 0,
+      lastMaintenance?.km ?? 0,
+      tripKm,
+    );
 
     await this.prisma.vehicle.update({
       where: { id: vehicleId },

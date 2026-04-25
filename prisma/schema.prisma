@@ -37,6 +37,8 @@ model Company {
   retailProductImports RetailProductImport[]
   supportRequests      SupportRequest[]
   vehicleDocuments     VehicleDocument[]
+  dangerousProducts    DangerousProduct[]
+  trips                Trip[]
   TireMovement         TireMovement[]
 
   @@index([active])
@@ -53,6 +55,7 @@ model Branch {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   vehicles             Vehicle[]
+  trips                Trip[]
   xmlImportBatches     XmlImportBatch[]
   xmlInvoices          XmlInvoice[]
   retailProductImports RetailProductImport[]
@@ -187,6 +190,7 @@ model User {
   supportRequestsResponded       SupportRequest[]          @relation("SupportRequestRespondedBy")
   supportRequestsCompleted       SupportRequest[]          @relation("SupportRequestCompletedBy")
   vehicleImplementHistoryChanges VehicleImplementHistory[] @relation("VehicleImplementHistoryActor")
+  tripComplianceChecks          TripComplianceCheck[]
 
   @@index([companyId])
 }
@@ -383,27 +387,195 @@ model SystemSetting {
 }
 
 model Trip {
-  id          String    @id @default(uuid())
+  id          String     @id @default(uuid())
   origin      String
   destination String
   reason      String?
-  departureKm Int       @map("kmStart")
-  returnKm    Int?      @map("kmEnd")
-  departureAt DateTime  @map("startedAt")
-  returnAt    DateTime? @map("endedAt")
-  status      String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  notes       String?
+  departureKm Int        @map("kmStart")
+  returnKm    Int?       @map("kmEnd")
+  departureAt DateTime   @map("startedAt")
+  returnAt    DateTime?  @map("endedAt")
+  status      TripStatus @default(DRAFT)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
+
+  branchId String?
+  branch   Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   vehicleId String
   vehicle   Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-  driverId  String?
-  driver    Driver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
 
+  driverId String?
+  driver   Driver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
+
+  products           TripProduct[]
+  complianceChecks   TripComplianceCheck[]
+  generatedDocuments TripGeneratedDocument[]
+
+  @@index([companyId])
+  @@index([branchId])
   @@index([vehicleId])
   @@index([driverId])
+  @@index([status])
   @@index([departureAt])
   @@map("TripUsage")
+}
+
+enum TripStatus {
+  DRAFT
+  PENDING_COMPLIANCE
+  BLOCKED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  OPEN
+}
+
+enum ComplianceStatus {
+  APPROVED
+  BLOCKED
+  WARNING
+}
+
+enum ComplianceSeverity {
+  INFO
+  WARNING
+  BLOCKING
+}
+
+enum GeneratedDocumentType {
+  EMERGENCY_SHEET
+  FISPQ
+  MDFE_MOCK
+  CHECKLIST
+}
+
+enum GeneratedDocumentStatus {
+  DRAFT
+  GENERATED
+  SENT
+  CANCELLED
+  ERROR
+}
+
+model DangerousProduct {
+  id String @id @default(uuid())
+
+  name            String
+  commercialName  String?
+  unNumber        String
+  riskClass       String
+  packingGroup    String?
+  hazardNumber    String?
+  emergencyNumber String?
+  physicalState   String?
+
+  emergencyInstructions Json?
+  fispqUrl              String?
+  active                Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  tripProducts TripProduct[]
+
+  @@index([companyId])
+  @@index([unNumber])
+  @@index([active])
+}
+
+model TripProduct {
+  id String @id @default(uuid())
+
+  quantity        Decimal  @db.Decimal(14, 3)
+  unit            String
+  tankCompartment String?
+  invoiceKey      String?
+  invoiceNumber   String?
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  tripId String
+  trip   Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  dangerousProductId String
+  dangerousProduct   DangerousProduct @relation(fields: [dangerousProductId], references: [id], onDelete: Restrict)
+
+  @@index([tripId])
+  @@index([dangerousProductId])
+  @@index([invoiceKey])
+}
+
+model TripComplianceCheck {
+  id String @id @default(uuid())
+
+  status          ComplianceStatus
+  summary         String?
+  checkedAt       DateTime @default(now())
+  checkedByUserId String?
+
+  tripId String
+  trip   Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  checkedByUser User? @relation(fields: [checkedByUserId], references: [id], onDelete: SetNull)
+
+  results TripComplianceResult[]
+
+  @@index([tripId])
+  @@index([status])
+  @@index([checkedAt])
+  @@index([checkedByUserId])
+}
+
+model TripComplianceResult {
+  id String @id @default(uuid())
+
+  ruleCode String
+  title    String
+  message  String
+  severity ComplianceSeverity
+  passed   Boolean
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  checkId String
+  check   TripComplianceCheck @relation(fields: [checkId], references: [id], onDelete: Cascade)
+
+  @@index([checkId])
+  @@index([ruleCode])
+  @@index([severity])
+  @@index([passed])
+}
+
+model TripGeneratedDocument {
+  id String @id @default(uuid())
+
+  type         GeneratedDocumentType
+  status       GeneratedDocumentStatus @default(DRAFT)
+  templateCode String?
+  fileUrl      String?
+  payload      Json?
+  errorMessage String?
+  generatedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tripId String
+  trip   Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@index([type])
+  @@index([status])
 }
 
 model VehicleDocument {
@@ -425,7 +597,7 @@ model VehicleDocument {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
   vehicleId String?
-  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
 
   driverId String?
   driver   Driver? @relation(fields: [driverId], references: [id], onDelete: SetNull)

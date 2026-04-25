@@ -11,9 +11,12 @@ import { SubscriptionAccessGuard } from './auth/subscription-access.guard';
 import { BillingModule } from './billing/billing.module';
 import { BranchesModule } from './branches/branches.module';
 import { CompaniesModule } from './companies/companies.module';
+import { ComplianceModule } from './compliance/compliance.module';
+import { DangerousProductsModule } from './dangerous-products/dangerous-products.module';
 import { DebtsModule } from './debts/debts.module';
 import { DriversModule } from './drivers/drivers.module';
 import { FuelRecordsModule } from './fuel-records/fuel-records.module';
+import { GeneratedDocumentsModule } from './generated-documents/generated-documents.module';
 import { MaintenancePlansModule } from './maintenance-plans/maintenance-plans.module';
 import { MaintenanceRecordsModule } from './maintenance-records/maintenance-records.module';
 import { MenuVisibilityModule } from './menu-visibility/menu-visibility.module';
@@ -23,16 +26,17 @@ import { RetailProductsModule } from './retail-products/retail-products.module';
 import { SystemResetModule } from './system-reset/system-reset.module';
 import { SupportModule } from './support/support.module';
 import { SystemSettingsModule } from './system-settings/system-settings.module';
+import { TireMovementsModule } from './tire-movements/tire-movements.module';
 import { TiresModule } from './tires/tires.module';
 import { TripsModule } from './trips/trips.module';
 import { UsersModule } from './users/users.module';
 import { VehicleDocumentsModule } from './vehicle-documents/vehicle-documents.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { XmlImportModule } from './xml-import/xml-import.module';
-import { TireMovementsModule } from './tire-movements/tire-movements.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     VehiclesModule,
     BranchesModule,
@@ -56,7 +60,9 @@ import { TireMovementsModule } from './tire-movements/tire-movements.module';
     SystemSettingsModule,
     BillingModule,
     XmlImportModule,
-    ConfigModule.forRoot({ isGlobal: true }),
+    DangerousProductsModule,
+    ComplianceModule,
+    GeneratedDocumentsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -67,4 +73,4 @@ import { TireMovementsModule } from './tire-movements/tire-movements.module';
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
-export class AppModule { }
+export class AppModule {}

@@ -10,7 +10,11 @@ import {
 } from 'class-validator';
 
 export enum TripStatusDto {
-  OPEN = 'OPEN',
+  DRAFT = 'DRAFT',
+  PENDING_COMPLIANCE = 'PENDING_COMPLIANCE',
+  BLOCKED = 'BLOCKED',
+  APPROVED = 'APPROVED',
+  IN_PROGRESS = 'IN_PROGRESS',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
 }
@@ -18,11 +22,11 @@ export enum TripStatusDto {
 export class CreateTripDto {
   @IsString()
   @Length(2, 120)
-  origin: string;
+  origin!: string;
 
   @IsString()
   @Length(2, 120)
-  destination: string;
+  destination!: string;
 
   @IsOptional()
   @IsString()
@@ -31,7 +35,7 @@ export class CreateTripDto {
 
   @IsNumber()
   @Min(0)
-  departureKm: number;
+  departureKm!: number;
 
   @IsOptional()
   @IsNumber()
@@ -39,7 +43,7 @@ export class CreateTripDto {
   returnKm?: number;
 
   @IsDateString()
-  departureAt: string;
+  departureAt!: string;
 
   @IsOptional()
   @IsDateString()
@@ -55,7 +59,7 @@ export class CreateTripDto {
   notes?: string;
 
   @IsUUID()
-  vehicleId: string;
+  vehicleId!: string;
 
   @IsOptional()
   @IsUUID()

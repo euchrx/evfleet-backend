@@ -36,17 +36,16 @@ type ImplementHistoryEntryInput = {
 
 @Injectable()
 export class VehiclesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   private static readonly AUTO_VEHICLE_DOCUMENT_DEFINITIONS: Array<{
     type: DocumentType;
     name: string;
   }> = [
-    { type: DocumentType.CRLV, name: 'CRLV' },
-    { type: DocumentType.LICENSING, name: 'Licenciamento' },
-    { type: DocumentType.IPVA, name: 'IPVA' },
-    { type: DocumentType.INSURANCE, name: 'Seguro' },
-  ];
+      { type: DocumentType.CRLV, name: 'CRLV' },
+      { type: DocumentType.CIV, name: 'CIV' },
+      { type: DocumentType.CIPP, name: 'CIPP' },
+    ];
 
   private async ensureDefaultVehicleDocuments(
     tx: any,
@@ -1086,20 +1085,20 @@ export class VehiclesService {
             ...(dto.axleCount !== undefined ? { axleCount: dto.axleCount } : {}),
             ...(dto.axleConfiguration !== undefined || dto.category !== undefined
               ? {
-                  axleConfiguration: shouldKeepTruckConfiguration
-                    ? dto.axleConfiguration ?? current.axleConfiguration ?? null
-                    : null,
-                }
+                axleConfiguration: shouldKeepTruckConfiguration
+                  ? dto.axleConfiguration ?? current.axleConfiguration ?? null
+                  : null,
+              }
               : {}),
             ...(dto.fuelType !== undefined || dto.category !== undefined
               ? { fuelType: shouldNullFuelAndTank ? null : dto.fuelType ?? current.fuelType ?? null }
               : {}),
             ...(dto.tankCapacity !== undefined || dto.category !== undefined
               ? {
-                  tankCapacity: shouldNullFuelAndTank
-                    ? null
-                    : dto.tankCapacity ?? current.tankCapacity ?? null,
-                }
+                tankCapacity: shouldNullFuelAndTank
+                  ? null
+                  : dto.tankCapacity ?? current.tankCapacity ?? null,
+              }
               : {}),
             ...(dto.acquisitionDate !== undefined
               ? { acquisitionDate: acquisitionDate ? new Date(acquisitionDate) : null }
