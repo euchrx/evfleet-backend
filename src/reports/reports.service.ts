@@ -28,8 +28,10 @@ export class ReportsService {
 
     vehicles.forEach((vehicle) => {
       if (!vehicle.branchId) return;
+
       const totalCost = costByVehicleId.get(vehicle.id) ?? 0;
       const currentTotal = branchCosts.get(vehicle.branchId) ?? 0;
+
       branchCosts.set(vehicle.branchId, currentTotal + totalCost);
     });
 
@@ -46,7 +48,6 @@ export class ReportsService {
   }
 
   async vehicleConsumption(vehicleId: string) {
-    const prisma = this.prisma as any;
     const vehicle = await this.prisma.vehicle.findUnique({
       where: { id: vehicleId },
       select: { id: true, plate: true, model: true },
@@ -54,16 +55,30 @@ export class ReportsService {
 
     if (!vehicle) return [];
 
-    const records = await prisma.maintenanceRecord.findMany({
+    const records = await (this.prisma as any).fuelRecord.findMany({
       where: { vehicleId },
-      select: { cost: true, km: true },
-      orderBy: { maintenanceDate: 'desc' },
+      select: {
+        liters: true,
+        km: true,
+        totalValue: true,
+        averageConsumptionKmPerLiter: true,
+      },
+      orderBy: { fuelDate: 'desc' },
       take: 20,
     });
 
-    const totalCost = records.reduce((acc, record) => acc + record.cost, 0);
-    const totalKm = records.reduce((acc, record) => acc + record.km, 0);
-    const averageConsumption = totalKm > 0 ? totalCost / totalKm : 0;
+    const totalLiters = records.reduce(
+      (acc, record) => acc + Number(record.liters ?? 0),
+      0,
+    );
+
+    const totalKm = records.reduce(
+      (acc, record) => acc + Number(record.km ?? 0),
+      0,
+    );
+
+    const averageConsumption =
+      totalLiters > 0 ? totalKm / totalLiters : 0;
 
     return [
       {
@@ -77,6 +92,7 @@ export class ReportsService {
 
   private async getVehicleCosts(where?: { id: string }) {
     const prisma = this.prisma as any;
+
     const vehicles = await this.prisma.vehicle.findMany({
       where,
       select: {
@@ -97,28 +113,76 @@ export class ReportsService {
 
     const vehicleIds = vehicles.map((vehicle) => vehicle.id);
 
-    const [maintenanceTotals, debtTotals] = await Promise.all([
+    const [
+      maintenanceTotals,
+      debtTotals,
+      fuelTotals,
+      productTotals,
+    ] = await Promise.all([
       prisma.maintenanceRecord.groupBy({
         by: ['vehicleId'],
-        where: { vehicleId: { in: vehicleIds } },
-        _sum: { cost: true },
+        where: {
+          vehicleId: { in: vehicleIds },
+        },
+        _sum: {
+          cost: true,
+        },
       }),
+
       prisma.debt.groupBy({
         by: ['vehicleId'],
-        where: { vehicleId: { in: vehicleIds } },
-        _sum: { amount: true },
+        where: {
+          vehicleId: { in: vehicleIds },
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+
+      prisma.fuelRecord.groupBy({
+        by: ['vehicleId'],
+        where: {
+          vehicleId: { in: vehicleIds },
+        },
+        _sum: {
+          totalValue: true,
+        },
+      }),
+
+      prisma.retailProductImport.groupBy({
+        by: ['vehicleId'],
+        where: {
+          vehicleId: { in: vehicleIds },
+        },
+        _sum: {
+          totalAmount: true,
+        },
       }),
     ]);
 
     const costByVehicleId = new Map<string, number>();
 
+    const addCost = (vehicleId: string | null, value?: number | null) => {
+      if (!vehicleId) return;
+
+      const current = costByVehicleId.get(vehicleId) ?? 0;
+      costByVehicleId.set(vehicleId, current + Number(value ?? 0));
+    };
+
     maintenanceTotals.forEach((item) => {
-      costByVehicleId.set(item.vehicleId, item._sum.cost ?? 0);
+      addCost(item.vehicleId, item._sum.cost);
     });
 
     debtTotals.forEach((item) => {
-      const current = costByVehicleId.get(item.vehicleId) ?? 0;
-      costByVehicleId.set(item.vehicleId, current + (item._sum.amount ?? 0));
+      addCost(item.vehicleId, item._sum.amount);
+    });
+
+    fuelTotals.forEach((item) => {
+      addCost(item.vehicleId, item._sum.totalValue);
+    });
+
+    productTotals.forEach((item) => {
+      addCost(item.vehicleId, item._sum.totalAmount);
     });
 
     return { vehicles, costByVehicleId };
