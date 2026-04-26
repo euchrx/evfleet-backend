@@ -37,7 +37,7 @@ export class TripsService {
         dangerousProduct: true,
       },
     },
-    mdfes: true,
+    mdfe: true,
   } as const;
 
   private readonly includeDetailsRelations = {
@@ -65,7 +65,7 @@ export class TripsService {
         createdAt: 'desc',
       },
     },
-    mdfes: true,
+    mdfe: true,
   } as const;
 
   async create(dto: CreateTripDto, req: any) {
@@ -204,7 +204,7 @@ export class TripsService {
           },
           take: 1,
         },
-        mdfes: {
+        mdfe: {
           select: {
             id: true,
             status: true,
@@ -229,7 +229,7 @@ export class TripsService {
       );
     }
 
-    const mdfe = trip.mdfes?.[0];
+    const mdfe = trip.mdfe?.[0];
 
     const hasMdfe =
         ['AUTHORIZED', 'PROCESSING', 'CLOSED'].includes(mdfe.status);

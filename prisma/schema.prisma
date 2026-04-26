@@ -41,7 +41,7 @@ model Company {
   dangerousProducts    DangerousProduct[]
   trips                Trip[]
   TireMovement         TireMovement[]
-  mdfes                Mdfe[]
+  mdfe                Mdfe[]
 
   @@index([active])
 }
