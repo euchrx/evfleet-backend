@@ -221,7 +221,7 @@ export class TripsService {
       throw new NotFoundException('Viagem nao encontrada');
     }
 
-    const lastCompliance = trip.complianceChecks[0];
+    const lastCompliance = trip.complianceChecks?.[0] ?? null;
 
     if (!lastCompliance || lastCompliance.status !== 'APPROVED') {
       throw new BadRequestException(
@@ -229,13 +229,17 @@ export class TripsService {
       );
     }
 
-    const mdfe = trip.mdfe?.[0];
+    const mdfe = trip.mdfe?.[0] ?? null;
+
+    if (!mdfe) {
+      throw new BadRequestException('MDF-e nao gerado para a viagem.');
+    }
 
     const hasMdfe =
-        ['AUTHORIZED', 'PROCESSING', 'CLOSED'].includes(mdfe.status);
+      ['AUTHORIZED', 'PROCESSING', 'CLOSED'].includes(mdfe.status);
 
     if (!hasMdfe) {
-      throw new BadRequestException('MDF-e nao gerado para a viagem.');
+      throw new BadRequestException('MDF-e nao autorizado para a viagem.');
     }
 
     return this.prisma.trip.update({
