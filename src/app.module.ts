@@ -33,6 +33,8 @@ import { UsersModule } from './users/users.module';
 import { VehicleDocumentsModule } from './vehicle-documents/vehicle-documents.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { XmlImportModule } from './xml-import/xml-import.module';
+import { FiscalSettingsModule } from './fiscal-settings/fiscal-settings.module';
+import { MdfeModule } from './mdfe/mdfe.module';
 
 @Module({
   imports: [
@@ -63,6 +65,8 @@ import { XmlImportModule } from './xml-import/xml-import.module';
     DangerousProductsModule,
     ComplianceModule,
     GeneratedDocumentsModule,
+    FiscalSettingsModule,
+    MdfeModule,
   ],
   controllers: [AppController],
   providers: [

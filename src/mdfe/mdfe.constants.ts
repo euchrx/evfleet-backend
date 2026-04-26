@@ -1,0 +1,1 @@
+export const MDFE_PROVIDER = 'MDFE_PROVIDER';

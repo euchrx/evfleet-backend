@@ -12,17 +12,18 @@ datasource db {
 }
 
 model Company {
-  id                      String    @id @default(uuid())
+  id                      String                 @id @default(uuid())
   name                    String
   document                String?
-  slug                    String?   @unique
-  active                  Boolean   @default(true)
+  slug                    String?                @unique
+  active                  Boolean                @default(true)
   legalAcceptanceVersion  String?
   legalAcceptedAt         DateTime?
   legalAcceptedByUserId   String?
   legalAcceptedByUserName String?
-  createdAt               DateTime  @default(now())
-  updatedAt               DateTime  @updatedAt
+  fiscalSettings          CompanyFiscalSettings?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
 
   plans                Plan[]
   branches             Branch[]
@@ -40,8 +41,44 @@ model Company {
   dangerousProducts    DangerousProduct[]
   trips                Trip[]
   TireMovement         TireMovement[]
+  mdfes                Mdfe[]
 
   @@index([active])
+}
+
+model CompanyFiscalSettings {
+  id        String @id @default(uuid())
+  companyId String @unique
+
+  cnpj              String
+  corporateName     String
+  tradeName         String?
+  stateRegistration String?
+  taxRegime         String?
+
+  addressStreet     String
+  addressNumber     String
+  addressDistrict   String
+  addressComplement String?
+  cityName          String
+  cityIbgeCode      String
+  state             String
+  zipCode           String
+
+  mdfeEnvironment FiscalEnvironment @default(HOMOLOGATION)
+  mdfeSeries      Int               @default(1)
+  mdfeNextNumber  Int               @default(1)
+
+  certificatePfxUrl            String?
+  certificatePasswordEncrypted String?
+  certificateExpiresAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([cnpj])
 }
 
 model Branch {
@@ -190,7 +227,7 @@ model User {
   supportRequestsResponded       SupportRequest[]          @relation("SupportRequestRespondedBy")
   supportRequestsCompleted       SupportRequest[]          @relation("SupportRequestCompletedBy")
   vehicleImplementHistoryChanges VehicleImplementHistory[] @relation("VehicleImplementHistoryActor")
-  tripComplianceChecks          TripComplianceCheck[]
+  tripComplianceChecks           TripComplianceCheck[]
 
   @@index([companyId])
 }
@@ -415,6 +452,7 @@ model Trip {
   products           TripProduct[]
   complianceChecks   TripComplianceCheck[]
   generatedDocuments TripGeneratedDocument[]
+  mdfe              Mdfe[]
 
   @@index([companyId])
   @@index([branchId])
@@ -463,6 +501,11 @@ enum GeneratedDocumentStatus {
   ERROR
 }
 
+enum FiscalEnvironment {
+  HOMOLOGATION
+  PRODUCTION
+}
+
 model DangerousProduct {
   id String @id @default(uuid())
 
@@ -504,7 +547,7 @@ model TripProduct {
   createdAt       DateTime @default(now())
 
   tripId String
-  trip   Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
 
   dangerousProductId String
   dangerousProduct   DangerousProduct @relation(fields: [dangerousProductId], references: [id], onDelete: Restrict)
@@ -519,11 +562,11 @@ model TripComplianceCheck {
 
   status          ComplianceStatus
   summary         String?
-  checkedAt       DateTime @default(now())
+  checkedAt       DateTime         @default(now())
   checkedByUserId String?
 
   tripId String
-  trip   Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
 
   checkedByUser User? @relation(fields: [checkedByUserId], references: [id], onDelete: SetNull)
 
@@ -571,7 +614,7 @@ model TripGeneratedDocument {
   updatedAt DateTime @updatedAt
 
   tripId String
-  trip   Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
 
   @@index([tripId])
   @@index([type])
@@ -825,6 +868,16 @@ enum XmlProcessingStatus {
 enum AxleConfiguration {
   SINGLE
   DUAL
+}
+
+enum MdfeStatus {
+  DRAFT
+  PROCESSING
+  AUTHORIZED
+  REJECTED
+  CANCELED
+  CLOSED
+  ERROR
 }
 
 model Plan {
@@ -1134,4 +1187,39 @@ model SupportRequest {
   @@index([companyId])
   @@index([status])
   @@index([createdAt])
+}
+
+model Mdfe {
+  id        String @id @default(uuid())
+  companyId String
+  tripId    String @unique
+
+  environment FiscalEnvironment
+  status      MdfeStatus @default(DRAFT)
+
+  accessKey String? @unique
+  protocol  String?
+
+  series Int
+  number Int
+
+  requestXml     String?
+  authorizedXml  String?
+  responseXml    String?
+
+  rejectionCode   String?
+  rejectionReason String?
+
+  issuedAt  DateTime?
+  closedAt  DateTime?
+  canceledAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  trip    Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([status])
 }

@@ -1,15 +1,13 @@
 import {
   BadRequestException,
-  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { MDFE_PROVIDER } from 'src/integrations/mdfe/mdfe.module';
-import { type MdfeProvider } from 'src/integrations/mdfe/mdfe-provider.interface';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { EmergencySheetTemplate } from './templates/emergency-sheet.template';
 import { MdfeTemplate } from './templates/mdfe.template';
+import { MdfeService } from 'src/mdfe/mdfe.service';
 
 type GeneratedTripDocumentType = 'EMERGENCY_SHEET' | 'MDFE_MOCK';
 
@@ -24,9 +22,7 @@ type ProductWithFispq = {
 export class GeneratedDocumentsService {
   constructor(
     private readonly prisma: PrismaService,
-
-    @Inject(MDFE_PROVIDER)
-    private readonly mdfeProvider: MdfeProvider,
+    private readonly mdfeService: MdfeService,
   ) { }
 
   private async ensureDocumentNotGenerated(
@@ -156,9 +152,14 @@ export class GeneratedDocumentsService {
       products: trip.products,
     });
 
-    const result = await this.mdfeProvider.issue({
-      tripId,
-    });
+
+    if (!trip.companyId) {
+      throw new BadRequestException(
+        'Viagem sem empresa vinculada. Não é possível gerar MDF-e.',
+      );
+    }
+
+    const result = await this.mdfeService.generate(tripId, trip.companyId);
 
     return this.prisma.tripGeneratedDocument.create({
       data: {

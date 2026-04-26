@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { TripsService } from './trips.service';
@@ -17,11 +18,11 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 @UseGuards(JwtAuthGuard)
 @Controller('trips')
 export class TripsController {
-  constructor(private readonly tripsService: TripsService) {}
+  constructor(private readonly tripsService: TripsService) { }
 
   @Post()
-  create(@Body() dto: CreateTripDto) {
-    return this.tripsService.create(dto);
+  create(@Body() dto: CreateTripDto, @Req() req: any) {
+    return this.tripsService.create(dto, req);
   }
 
   @Get()

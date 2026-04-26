@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from 'src/prisma/prisma.module';
+import { MdfeModule } from 'src/mdfe/mdfe.module';
 import { GeneratedDocumentsController } from './generated-documents.controller';
 import { GeneratedDocumentsService } from './generated-documents.service';
-import { MdfeModule } from 'src/integrations/mdfe/mdfe.module';
 
 @Module({
   imports: [PrismaModule, MdfeModule],

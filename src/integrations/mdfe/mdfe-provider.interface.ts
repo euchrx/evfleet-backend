@@ -2,12 +2,35 @@ export type MdfeIssueInput = {
   tripId: string;
 };
 
+export type MdfeCloseInput = {
+  accessKey: string;
+  cityIbgeCode: string;
+  state: string;
+  closedAt?: Date;
+};
+
+export type MdfeCancelInput = {
+  accessKey: string;
+  reason: string;
+};
+
+export type MdfeProviderStatus =
+  | 'AUTHORIZED'
+  | 'REJECTED'
+  | 'PROCESSING'
+  | 'ERROR'
+  | 'CANCELED'
+  | 'CLOSED';
+
 export type MdfeIssueResult = {
-  status: 'AUTHORIZED' | 'REJECTED' | 'PROCESSING' | 'ERROR';
+  status: MdfeProviderStatus;
   accessKey?: string;
   protocol?: string;
   xmlUrl?: string;
   pdfUrl?: string;
+  requestXml?: string;
+  authorizedXml?: string;
+  responseXml?: string;
   rejectionCode?: string;
   rejectionReason?: string;
   rawResponse?: unknown;
@@ -15,7 +38,10 @@ export type MdfeIssueResult = {
 
 export interface MdfeProvider {
   issue(input: MdfeIssueInput): Promise<MdfeIssueResult>;
-  cancel(accessKey: string, reason: string): Promise<MdfeIssueResult>;
-  close(accessKey: string): Promise<MdfeIssueResult>;
+
+  cancel(input: MdfeCancelInput): Promise<MdfeIssueResult>;
+
+  close(input: MdfeCloseInput): Promise<MdfeIssueResult>;
+
   getStatus(accessKey: string): Promise<MdfeIssueResult>;
 }
