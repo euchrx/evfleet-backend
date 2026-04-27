@@ -1,15 +1,15 @@
 # EvFleet Backend
 
-Backend do EvFleet, plataforma de gestão operacional e financeira focada em rede de postos, abastecimentos, produtos de conveniência e controle da frota vinculada à operação.
+Backend do EvFleet, plataforma de gestão operacional e financeira focada em **rede de postos**, abastecimentos, produtos comprados no posto e controle da frota vinculada à operação.
 
 ## Escopo do sistema
 
-O backend atende os fluxos principais da operação:
-
-- gestão de empresas, usuários e assinatura
+O backend atende os fluxos principais do produto:
+- empresas, usuários e permissões
+- assinatura, cobrança e checkout
 - veículos, motoristas e filiais
 - abastecimentos e importação de XML de NF-e
-- produtos comprados na rede de postos, com categorização automática
+- produtos importados da NF-e com categorização automática
 - manutenções, pneus, débitos, documentos e viagens
 - suporte, notificações e auditoria
 
@@ -49,6 +49,9 @@ npx prisma migrate deploy
 npx prisma migrate dev
 ```
 
+Observação:
+- se o histórico antigo de migrations estiver inconsistente no ambiente local, `db push` pode ser usado como apoio técnico em desenvolvimento, mas o fluxo preferencial continua sendo migrations controladas.
+
 ## Seed
 
 ```bash
@@ -56,9 +59,8 @@ node prisma/seed.js
 ```
 
 Regra atual do seed:
-
 - se já existir qualquer usuário com perfil `ADMIN`, o seed não cria outro
-- se não existir empresa ativa, o seed cria uma empresa padrão para vincular o admin inicial
+- se ainda não existir empresa ativa, o seed cria a base mínima para o admin inicial
 
 ## Testes
 
@@ -73,9 +75,7 @@ npm run test:cov
 npm run test:e2e
 ```
 
-## Organização funcional
-
-Alguns módulos centrais do projeto:
+## Módulos centrais
 
 - `auth`
 - `companies`
@@ -84,10 +84,16 @@ Alguns módulos centrais do projeto:
 - `xml-import`
 - `retail-products`
 - `maintenance-records`
+- `tires`
+- `vehicle-documents`
 - `support`
 
-## Observações
+## Regras importantes
 
-- o sistema foi evoluído para tratar XML de NF-e com foco em abastecimentos e produtos da rede de postos
-- o fluxo de assinatura e cobrança deve refletir pagamento confirmado antes de alterar o plano ativo
-- funcionalidades administrativas convivem com fluxos operacionais da ponta
+- mudança de plano só deve refletir após pagamento confirmado
+- `Starter` é o plano elegível para o fluxo de suporte do cliente
+- aceite legal é versionado por empresa
+- o backend sustenta dois fluxos de XML:
+  - abastecimentos
+  - produtos
+- a operação foi moldada para rede de postos e não apenas para frota genérica
