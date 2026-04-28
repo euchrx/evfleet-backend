@@ -41,7 +41,9 @@ model Company {
   dangerousProducts    DangerousProduct[]
   trips                Trip[]
   TireMovement         TireMovement[]
-  mdfe                Mdfe[]
+  mdfe                 Mdfe[]
+  mdfeEvents           MdfeEvent[]
+  tripFiscalDocuments  TripFiscalDocument[]
 
   @@index([active])
 }
@@ -56,6 +58,8 @@ model CompanyFiscalSettings {
   stateRegistration String?
   taxRegime         String?
 
+  rntrc String?
+
   addressStreet     String
   addressNumber     String
   addressDistrict   String
@@ -68,6 +72,11 @@ model CompanyFiscalSettings {
   mdfeEnvironment FiscalEnvironment @default(HOMOLOGATION)
   mdfeSeries      Int               @default(1)
   mdfeNextNumber  Int               @default(1)
+
+  mdfeDefaultInsurerName     String?
+  mdfeDefaultInsurerDocument String?
+  mdfeDefaultPolicyNumber    String?
+  mdfePaymentPixKey          String?
 
   certificatePfxUrl            String?
   certificatePasswordEncrypted String?
@@ -209,6 +218,21 @@ enum Role {
   FLEET_MANAGER
   REGIONAL_MANAGER
   BRANCH_MANAGER
+}
+
+enum TripFiscalDocumentType {
+  CTE
+  NFE
+}
+
+enum MdfeCargoUnit {
+  KG
+  TON
+}
+
+enum MdfePaymentIndicator {
+  PAID
+  UNPAID
 }
 
 model User {
@@ -437,6 +461,34 @@ model Trip {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
+  originState        String?
+  originCityName     String?
+  originCityIbgeCode String?
+  originZipCode      String?
+
+  destinationState        String?
+  destinationCityName     String?
+  destinationCityIbgeCode String?
+  destinationZipCode      String?
+
+  cargoDescription String?
+  cargoNcm         String?
+  cargoValue       Decimal?       @db.Decimal(14, 2)
+  cargoQuantity    Decimal?       @db.Decimal(14, 4)
+  cargoUnit        MdfeCargoUnit? @default(KG)
+
+  contractorName     String?
+  contractorDocument String?
+
+  paymentIndicator MdfePaymentIndicator? @default(UNPAID)
+  paymentValue     Decimal?              @db.Decimal(14, 2)
+  paymentPixKey    String?
+
+  insuranceCompanyName     String?
+  insuranceCompanyDocument String?
+  insurancePolicyNumber    String?
+  insuranceEndorsement     String?
+
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Restrict)
 
@@ -450,9 +502,10 @@ model Trip {
   driver   Driver? @relation(fields: [driverId], references: [id], onDelete: SetNull)
 
   products           TripProduct[]
+  fiscalDocuments    TripFiscalDocument[]
   complianceChecks   TripComplianceCheck[]
   generatedDocuments TripGeneratedDocument[]
-  mdfe              Mdfe[]
+  mdfe               Mdfe?
 
   @@index([companyId])
   @@index([branchId])
@@ -460,7 +513,39 @@ model Trip {
   @@index([driverId])
   @@index([status])
   @@index([departureAt])
+  @@index([originState])
+  @@index([destinationState])
   @@map("TripUsage")
+}
+
+model TripFiscalDocument {
+  id String @id @default(uuid())
+
+  type      TripFiscalDocumentType
+  accessKey String
+  number    String?
+  series    String?
+  issuedAt  DateTime?
+
+  issuerName     String?
+  issuerDocument String?
+
+  totalValue Decimal? @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tripId String
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, accessKey])
+  @@index([tripId])
+  @@index([companyId])
+  @@index([type])
+  @@index([accessKey])
 }
 
 enum TripStatus {
@@ -880,6 +965,19 @@ enum MdfeStatus {
   ERROR
 }
 
+enum MdfeEventType {
+  CLOSE
+  CANCEL
+  CONSULT
+}
+
+enum MdfeEventStatus {
+  SENT
+  AUTHORIZED
+  REJECTED
+  ERROR
+}
+
 model Plan {
   id             String       @id @default(cuid())
   code           String       @unique
@@ -1195,7 +1293,7 @@ model Mdfe {
   tripId    String @unique
 
   environment FiscalEnvironment
-  status      MdfeStatus @default(DRAFT)
+  status      MdfeStatus        @default(DRAFT)
 
   accessKey String? @unique
   protocol  String?
@@ -1203,23 +1301,64 @@ model Mdfe {
   series Int
   number Int
 
-  requestXml     String?
-  authorizedXml  String?
-  responseXml    String?
+  requestXml    String?
+  authorizedXml String?
+  responseXml   String?
+
+  lastEventCode   String?
+  lastEventReason String?
+  lastEventAt     DateTime?
 
   rejectionCode   String?
   rejectionReason String?
 
-  issuedAt  DateTime?
-  closedAt  DateTime?
-  canceledAt DateTime?
+  issuedAt     DateTime?
+  authorizedAt DateTime?
+  closedAt     DateTime?
+  canceledAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  trip    Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  trip    Trip        @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  events  MdfeEvent[]
 
   @@index([companyId])
   @@index([status])
+  @@index([accessKey])
+  @@index([protocol])
+  @@index([companyId, status])
+}
+
+model MdfeEvent {
+  id String @id @default(uuid())
+
+  mdfeId    String
+  companyId String
+
+  type   MdfeEventType
+  status MdfeEventStatus @default(SENT)
+
+  eventSequence Int?
+  eventProtocol String?
+  eventCode     String?
+  eventReason   String?
+  eventAt       DateTime?
+
+  requestXml  String?
+  responseXml String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  mdfe    Mdfe    @relation(fields: [mdfeId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([mdfeId])
+  @@index([companyId])
+  @@index([type])
+  @@index([status])
+  @@index([eventProtocol])
+  @@index([createdAt])
 }

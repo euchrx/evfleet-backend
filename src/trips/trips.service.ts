@@ -14,7 +14,7 @@ import { AddTripProductDto } from './dto/add-trip-product.dto';
 export class TripsService {
   private readonly logger = new Logger(TripsService.name);
 
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(private readonly prisma: PrismaService) {}
 
   private readonly includeRelations = {
     vehicle: {
@@ -72,8 +72,7 @@ export class TripsService {
     await this.ensureVehicleExists(dto.vehicleId);
     if (dto.driverId) await this.ensureDriverExists(dto.driverId);
 
-    const companyId =
-      req?.companyScopeId || req?.user?.companyId;
+    const companyId = req?.companyScopeId || req?.user?.companyId;
 
     if (!companyId) {
       throw new BadRequestException(
@@ -95,8 +94,6 @@ export class TripsService {
         notes: dto.notes ?? null,
         vehicleId: dto.vehicleId,
         driverId: dto.driverId ?? null,
-
-        // 🔥 AQUI ESTÁ O MAIS IMPORTANTE
         companyId,
       },
       include: this.includeDetailsRelations,
@@ -165,7 +162,9 @@ export class TripsService {
         ...(dto.status !== undefined ? { status: dto.status } : {}),
         ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}),
         ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
-        ...(dto.driverId !== undefined ? { driverId: dto.driverId || null } : {}),
+        ...(dto.driverId !== undefined
+          ? { driverId: dto.driverId || null }
+          : {}),
       },
       include: this.includeDetailsRelations,
     });
@@ -209,10 +208,6 @@ export class TripsService {
             id: true,
             status: true,
           },
-          take: 1,
-          orderBy: {
-            createdAt: "desc",
-          },
         },
       },
     });
@@ -229,14 +224,15 @@ export class TripsService {
       );
     }
 
-    const mdfe = trip.mdfe?.[0] ?? null;
+    const mdfe = trip.mdfe ?? null;
 
     if (!mdfe) {
       throw new BadRequestException('MDF-e nao gerado para a viagem.');
     }
 
-    const hasMdfe =
-      ['AUTHORIZED', 'PROCESSING', 'CLOSED'].includes(mdfe.status);
+    const hasMdfe = ['AUTHORIZED', 'PROCESSING', 'CLOSED'].includes(
+      mdfe.status,
+    );
 
     if (!hasMdfe) {
       throw new BadRequestException('MDF-e nao autorizado para a viagem.');

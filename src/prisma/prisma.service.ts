@@ -8,13 +8,16 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { RequestScope } from '../common/request-scope';
 
 @Injectable()
-export class PrismaService extends PrismaClient
-  implements OnModuleInit, OnModuleDestroy, OnApplicationShutdown {
+export class PrismaService
+  extends PrismaClient
+  implements OnModuleInit, OnModuleDestroy, OnApplicationShutdown
+{
   constructor() {
     super();
 
     this.$use(async (params, next) => {
       const companyId = RequestScope.getCompanyId();
+
       if (!companyId) {
         return next(params);
       }
@@ -26,25 +29,30 @@ export class PrismaService extends PrismaClient
         'count',
         'aggregate',
       ]);
+
       if (!readActions.has(params.action)) {
         return next(params);
       }
 
       const scopedWhere = this.resolveScopedWhere(params.model, companyId);
+
       if (!scopedWhere) {
         return next(params);
       }
 
       const currentArgs = params.args || {};
       const currentWhere = currentArgs.where || {};
-      const nextAction = params.action === 'findUnique' ? 'findFirst' : params.action;
+
       params.args = {
         ...currentArgs,
         where: {
           AND: [currentWhere, scopedWhere],
         },
       };
-      params.action = nextAction;
+
+      if (params.action === 'findUnique') {
+        params.action = 'findFirst';
+      }
 
       return next(params);
     });
@@ -66,27 +74,97 @@ export class PrismaService extends PrismaClient
     switch (model) {
       case 'Company':
         return { id: companyId };
+
+      case 'CompanyFiscalSettings':
+        return { companyId };
+
       case 'Branch':
       case 'User':
       case 'Subscription':
       case 'Payment':
       case 'SupportRequest':
       case 'WebhookEvent':
-        return { companyId };
       case 'Vehicle':
+      case 'VehicleDocument':
+      case 'DangerousProduct':
+      case 'XmlImportBatch':
+      case 'XmlInvoice':
+      case 'RetailProductImport':
+      case 'TireMovement':
+      case 'Mdfe':
+      case 'TripFiscalDocument':
         return { companyId };
+
       case 'Driver':
-        return { vehicle: { companyId } };
+        return { companyId };
+
+      case 'Trip':
+        return {
+          OR: [
+            { companyId },
+            { vehicle: { companyId } },
+          ],
+        };
+
+      case 'TripProduct':
+        return {
+          trip: {
+            OR: [
+              { companyId },
+              { vehicle: { companyId } },
+            ],
+          },
+        };
+
+      case 'TripComplianceCheck':
+      case 'TripGeneratedDocument':
+        return {
+          trip: {
+            OR: [
+              { companyId },
+              { vehicle: { companyId } },
+            ],
+          },
+        };
+
+      case 'TripComplianceResult':
+        return {
+          check: {
+            trip: {
+              OR: [
+                { companyId },
+                { vehicle: { companyId } },
+              ],
+            },
+          },
+        };
+
+      case 'VehicleImplementLink':
+        return {
+          vehicle: {
+            companyId,
+          },
+        };
+
+      case 'VehicleImplementHistory':
+        return {
+          vehicle: {
+            companyId,
+          },
+        };
+
       case 'MaintenanceRecord':
       case 'MaintenancePlan':
       case 'Debt':
       case 'FuelRecord':
-      case 'Trip':
       case 'VehicleChangeLog':
       case 'VehicleProfilePhoto':
-        return { vehicle: { companyId } };
-      case 'VehicleDocument':
-        return { companyId };
+        return {
+          vehicle: {
+            companyId,
+          },
+        };
+
       case 'Tire':
         return {
           OR: [
@@ -94,6 +172,7 @@ export class PrismaService extends PrismaClient
             { vehicleId: null },
           ],
         };
+
       case 'TireReading':
         return {
           OR: [
@@ -102,6 +181,16 @@ export class PrismaService extends PrismaClient
             { tire: { vehicleId: null } },
           ],
         };
+
+      case 'Plan':
+        return {
+          OR: [
+            { companyId },
+            { companyId: null },
+            { isPublic: true },
+          ],
+        };
+
       default:
         return null;
     }

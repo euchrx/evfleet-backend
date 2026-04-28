@@ -4,6 +4,7 @@ export type MdfeIssueInput = {
 
 export type MdfeCloseInput = {
   accessKey: string;
+  protocol?: string;
   cityIbgeCode: string;
   state: string;
   closedAt?: Date;
@@ -11,6 +12,7 @@ export type MdfeCloseInput = {
 
 export type MdfeCancelInput = {
   accessKey: string;
+  protocol?: string;
   reason: string;
 };
 
@@ -26,6 +28,7 @@ export type MdfeIssueResult = {
   status: MdfeProviderStatus;
   accessKey?: string;
   protocol?: string;
+  authorizedAt?: Date;
   xmlUrl?: string;
   pdfUrl?: string;
   requestXml?: string;
@@ -33,6 +36,7 @@ export type MdfeIssueResult = {
   responseXml?: string;
   rejectionCode?: string;
   rejectionReason?: string;
+  protMdfeXml?: string;
   rawResponse?: unknown;
 };
 

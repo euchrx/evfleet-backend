@@ -3,6 +3,7 @@ import { PrismaModule } from 'src/prisma/prisma.module';
 import { MockMdfeProvider } from './mock-mdfe.provider';
 import { SefazMdfeProvider } from './sefaz-mdfe.provider';
 import { MdfeXmlBuilder } from './xml/mdfe-xml.builder';
+import { MdfeEventXmlBuilder } from './xml/mdfe-event-xml.builder';
 import { MdfeXmlSignerService } from './xml/mdfe-xml-signer.service';
 import { MdfeSoapClient } from './soap/mdfe-soap.client';
 import { MdfeResponseParserService } from './xml/mdfe-response-parser.service';
@@ -14,6 +15,7 @@ import { MDFE_PROVIDER } from 'src/mdfe/mdfe.constants';
     MockMdfeProvider,
     SefazMdfeProvider,
     MdfeXmlBuilder,
+    MdfeEventXmlBuilder,
     MdfeXmlSignerService,
     MdfeSoapClient,
     MdfeResponseParserService,

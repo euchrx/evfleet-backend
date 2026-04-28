@@ -3,84 +3,106 @@ import * as forge from 'node-forge';
 import { SignedXml } from 'xml-crypto';
 
 type SignMdfeXmlInput = {
-    xml: string;
-    pfxBuffer: Buffer;
-    password: string;
+  xml: string;
+  pfxBuffer: Buffer;
+  password: string;
 };
 
 @Injectable()
 export class MdfeXmlSignerService {
-    sign(input: SignMdfeXmlInput): string {
-        const { privateKeyPem, certificatePem } = this.extractCertificateFromPfx(
-            input.pfxBuffer,
-            input.password,
-        );
+  sign(input: SignMdfeXmlInput): string {
+    return this.signByReference({
+      ...input,
+      referenceXPath: "//*[local-name(.)='infMDFe']",
+      locationReferenceXPath: "//*[local-name(.)='infMDFeSupl']",
+      locationAction: 'after',
+    });
+  }
 
-        const certificateBase64 = this.normalizeCertificate(certificatePem);
+  signEvent(input: SignMdfeXmlInput): string {
+    return this.signByReference({
+      ...input,
+      referenceXPath: "//*[local-name(.)='infEvento']",
+      locationReferenceXPath: "//*[local-name(.)='infEvento']",
+      locationAction: 'after',
+    });
+  }
 
-        const signer = new SignedXml({
-            privateKey: privateKeyPem,
-            publicCert: certificatePem,
-            canonicalizationAlgorithm:
-                'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
-            signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
-        });
+  private signByReference(input: SignMdfeXmlInput & {
+    referenceXPath: string;
+    locationReferenceXPath: string;
+    locationAction: 'before' | 'after' | 'append' | 'prepend';
+  }): string {
+    const { privateKeyPem, certificatePem } = this.extractCertificateFromPfx(
+      input.pfxBuffer,
+      input.password,
+    );
 
-        signer.addReference({
-            xpath: "//*[local-name(.)='infMDFe']",
-            transforms: [
-                'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
-                'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
-            ],
-            digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
-        });
+    const certificateBase64 = this.normalizeCertificate(certificatePem);
 
-        signer.getKeyInfoContent = () => {
-            return `<X509Data><X509Certificate>${certificateBase64}</X509Certificate></X509Data>`;
-        };
+    const signer = new SignedXml({
+      privateKey: privateKeyPem,
+      publicCert: certificatePem,
+      canonicalizationAlgorithm:
+        'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+      signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
+    });
 
-        signer.computeSignature(input.xml, {
-            location: {
-                reference: "//*[local-name(.)='infMDFe']",
-                action: 'after',
-            },
-        });
+    signer.addReference({
+      xpath: input.referenceXPath,
+      transforms: [
+        'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
+        'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
+      ],
+      digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
+    });
 
-        return signer.getSignedXml();
+    signer.getKeyInfoContent = () => {
+      return `<X509Data><X509Certificate>${certificateBase64}</X509Certificate></X509Data>`;
+    };
+
+    signer.computeSignature(input.xml, {
+      location: {
+        reference: input.locationReferenceXPath,
+        action: input.locationAction,
+      },
+    });
+
+    return signer.getSignedXml();
+  }
+
+  private extractCertificateFromPfx(pfxBuffer: Buffer, password: string) {
+    const p12Asn1 = forge.asn1.fromDer(pfxBuffer.toString('binary'));
+    const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, false, password);
+
+    const keyBags =
+      p12.getBags({
+        bagType: forge.pki.oids.pkcs8ShroudedKeyBag,
+      })[forge.pki.oids.pkcs8ShroudedKeyBag] ?? [];
+
+    const certBags =
+      p12.getBags({
+        bagType: forge.pki.oids.certBag,
+      })[forge.pki.oids.certBag] ?? [];
+
+    const keyBag = keyBags[0];
+    const certBag = certBags[0];
+
+    if (!keyBag?.key || !certBag?.cert) {
+      throw new Error('Certificado A1 inválido ou senha incorreta.');
     }
 
-    private extractCertificateFromPfx(pfxBuffer: Buffer, password: string) {
-        const p12Asn1 = forge.asn1.fromDer(pfxBuffer.toString('binary'));
-        const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, false, password);
+    return {
+      privateKeyPem: forge.pki.privateKeyToPem(keyBag.key),
+      certificatePem: forge.pki.certificateToPem(certBag.cert),
+    };
+  }
 
-        const keyBags =
-            p12.getBags({
-                bagType: forge.pki.oids.pkcs8ShroudedKeyBag,
-            })[forge.pki.oids.pkcs8ShroudedKeyBag] ?? [];
-
-        const certBags =
-            p12.getBags({
-                bagType: forge.pki.oids.certBag,
-            })[forge.pki.oids.certBag] ?? [];
-
-        const keyBag = keyBags[0];
-        const certBag = certBags[0];
-
-        if (!keyBag?.key || !certBag?.cert) {
-            throw new Error('Certificado A1 inválido ou senha incorreta.');
-        }
-
-        return {
-            privateKeyPem: forge.pki.privateKeyToPem(keyBag.key),
-            certificatePem: forge.pki.certificateToPem(certBag.cert),
-        };
-    }
-
-    private normalizeCertificate(certificatePem: string): string {
-        return certificatePem
-            .replace('-----BEGIN CERTIFICATE-----', '')
-            .replace('-----END CERTIFICATE-----', '')
-            .replace(/\r?\n|\r/g, '')
-            .trim();
-    }
+  private normalizeCertificate(certificatePem: string): string {
+    return certificatePem
+      .replace('-----BEGIN CERTIFICATE-----', '')
+      .replace('-----END CERTIFICATE-----', '')
+      .replace(/\r?\n|\r/g, '')
+      .trim();
+  }
 }

@@ -8,6 +8,7 @@ import { MDFE_PROVIDER } from './mdfe.constants';
 import type {
   MdfeProvider,
   MdfeProviderStatus,
+  MdfeIssueResult,
 } from 'src/integrations/mdfe/mdfe-provider.interface';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { DamdfeService } from './damdfe.service';
@@ -24,78 +25,134 @@ export class MdfeService {
   ) { }
 
   async generate(tripId: string, companyId: string) {
-    const trip = await this.prisma.trip.findUnique({
-      where: { id: tripId },
-    });
+    const { mdfe } = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`mdfe-number-${companyId}`}))`;
 
-    if (!trip) {
-      throw new NotFoundException('Viagem não encontrada.');
-    }
+      const trip = await tx.trip.findFirst({
+        where: {
+          id: tripId,
+          companyId,
+        },
+        include: {
+          vehicle: true,
+        },
+      });
 
-    if (!trip.companyId) {
-      throw new BadRequestException(
-        'Viagem sem empresa vinculada. Não é possível gerar MDF-e.',
-      );
-    }
+      if (!trip) {
+        throw new NotFoundException('Viagem não encontrada.');
+      }
 
-    if (trip.companyId !== companyId) {
-      throw new BadRequestException(
-        'A viagem não pertence à empresa do usuário autenticado.',
-      );
-    }
+      if (!trip.companyId) {
+        throw new BadRequestException(
+          'Viagem sem empresa vinculada. Não é possível gerar MDF-e.',
+        );
+      }
 
-    const existing = await this.prisma.mdfe.findUnique({
-      where: { tripId },
-    });
+      const existing = await tx.mdfe.findUnique({
+        where: { tripId },
+      });
 
-    if (
-      existing &&
-      ['AUTHORIZED', 'PROCESSING', 'CLOSED', 'CANCELED'].includes(
-        existing.status,
-      )
-    ) {
-      throw new BadRequestException(
-        'Já existe MDF-e em processamento, autorizado, encerrado ou cancelado para esta viagem.',
-      );
-    }
+      if (
+        existing &&
+        ['AUTHORIZED', 'PROCESSING', 'CLOSED', 'CANCELED'].includes(
+          existing.status,
+        )
+      ) {
+        throw new BadRequestException(
+          'Já existe MDF-e em processamento, autorizado, encerrado ou cancelado para esta viagem.',
+        );
+      }
 
-    const fiscal = await this.prisma.companyFiscalSettings.findUnique({
-      where: { companyId },
-    });
+      if (trip.vehicleId) {
+        const openMdfe = await tx.mdfe.findFirst({
+          where: {
+            companyId,
+            status: {
+              in: ['AUTHORIZED', 'PROCESSING'],
+            },
+            tripId: {
+              not: tripId,
+            },
+            trip: {
+              vehicleId: trip.vehicleId,
+              destinationState: trip.destinationState,
+            },
+          },
+          select: {
+            accessKey: true,
+            protocol: true,
+            trip: {
+              select: {
+                destinationState: true,
+              },
+            },
+          },
+        });
 
-    if (!fiscal) {
-      throw new BadRequestException('Configuração fiscal não encontrada.');
-    }
+        if (openMdfe) {
+          throw new BadRequestException(
+            `Existe MDF-e autorizado e não encerrado para esta placa/UF. Encerre o MDF-e ${openMdfe.accessKey || ''} antes de emitir outro.`,
+          );
+        }
+      }
 
-    if (!fiscal.cnpj || !fiscal.state || !fiscal.cityIbgeCode) {
-      throw new BadRequestException(
-        'Configuração fiscal incompleta. Verifique CNPJ, UF e código IBGE do município.',
-      );
-    }
+      const fiscal = await tx.companyFiscalSettings.findUnique({
+        where: { companyId },
+      });
 
-    const mdfe = await this.prisma.mdfe.upsert({
-      where: { tripId },
-      create: {
-        tripId,
-        companyId,
-        environment: fiscal.mdfeEnvironment,
-        series: fiscal.mdfeSeries,
-        number: fiscal.mdfeNextNumber,
-        status: 'PROCESSING',
-      },
-      update: {
-        environment: fiscal.mdfeEnvironment,
-        series: fiscal.mdfeSeries,
-        status: 'PROCESSING',
-        rejectionCode: null,
-        rejectionReason: null,
-      },
+      if (!fiscal) {
+        throw new BadRequestException('Configuração fiscal não encontrada.');
+      }
+
+      if (!fiscal.cnpj || !fiscal.state || !fiscal.cityIbgeCode) {
+        throw new BadRequestException(
+          'Configuração fiscal incompleta. Verifique CNPJ, UF e código IBGE do município.',
+        );
+      }
+
+      const nextNumber = fiscal.mdfeNextNumber;
+
+      const mdfe = await tx.mdfe.upsert({
+        where: { tripId },
+        create: {
+          tripId,
+          companyId,
+          environment: fiscal.mdfeEnvironment,
+          series: fiscal.mdfeSeries,
+          number: nextNumber,
+          status: 'PROCESSING',
+          rejectionCode: null,
+          rejectionReason: null,
+        },
+        update: {
+          environment: fiscal.mdfeEnvironment,
+          series: fiscal.mdfeSeries,
+          number: nextNumber,
+          status: 'PROCESSING',
+          rejectionCode: null,
+          rejectionReason: null,
+          lastEventCode: null,
+          lastEventReason: null,
+          lastEventAt: null,
+        },
+      });
+
+      await tx.companyFiscalSettings.update({
+        where: { companyId },
+        data: {
+          mdfeNextNumber: {
+            increment: 1,
+          },
+        },
+      });
+
+      return { mdfe };
     });
 
     const result = await this.mdfeProvider.issue({ tripId });
 
     if (result.status === 'AUTHORIZED') {
-      await this.prisma.mdfe.update({
+      const updated = await this.prisma.mdfe.update({
         where: { id: mdfe.id },
         data: {
           status: 'AUTHORIZED',
@@ -109,21 +166,18 @@ export class MdfeService {
           rejectionCode: null,
           rejectionReason: null,
           issuedAt: new Date(),
+          authorizedAt: result.authorizedAt ?? null,
         },
       });
 
-      await this.prisma.companyFiscalSettings.update({
-        where: { companyId },
-        data: {
-          mdfeNextNumber: { increment: 1 },
-        },
-      });
-
-      return result;
+      return {
+        ...result,
+        mdfe: this.toMdfeSummary(updated),
+      };
     }
 
     if (result.status === 'REJECTED') {
-      await this.prisma.mdfe.update({
+      const updated = await this.prisma.mdfe.update({
         where: { id: mdfe.id },
         data: {
           status: 'REJECTED',
@@ -136,10 +190,13 @@ export class MdfeService {
         },
       });
 
-      return result;
+      return {
+        ...result,
+        mdfe: this.toMdfeSummary(updated),
+      };
     }
 
-    await this.prisma.mdfe.update({
+    const updated = await this.prisma.mdfe.update({
       where: { id: mdfe.id },
       data: {
         status: this.mapProviderStatusToMdfeStatus(result.status),
@@ -150,7 +207,10 @@ export class MdfeService {
       },
     });
 
-    return result;
+    return {
+      ...result,
+      mdfe: this.toMdfeSummary(updated),
+    };
   }
 
   async consult(tripId: string, companyId: string) {
@@ -162,31 +222,34 @@ export class MdfeService {
 
     const result = await this.mdfeProvider.getStatus(mdfe.accessKey);
 
+    const mappedStatus = this.mapProviderStatusToMdfeStatus(result.status);
+    const now = new Date();
+
     const updated = await this.prisma.mdfe.update({
       where: { id: mdfe.id },
       data: {
-        status: this.mapProviderStatusToMdfeStatus(result.status),
+        status: mappedStatus,
         protocol: result.protocol ?? mdfe.protocol,
         responseXml: this.normalizeXml(result.responseXml ?? result.rawResponse),
         rejectionCode: result.rejectionCode ?? null,
         rejectionReason: result.rejectionReason ?? null,
-        closedAt: result.status === 'CLOSED' ? new Date() : mdfe.closedAt,
-        canceledAt: result.status === 'CANCELED' ? new Date() : mdfe.canceledAt,
+        lastEventCode: result.rejectionCode ?? null,
+        lastEventReason: result.rejectionReason ?? null,
+        lastEventAt: now,
+        closedAt: result.status === 'CLOSED' ? now : mdfe.closedAt,
+        canceledAt: result.status === 'CANCELED' ? now : mdfe.canceledAt,
       },
     });
 
-    return {
-      id: updated.id,
-      tripId: updated.tripId,
-      status: updated.status,
-      accessKey: updated.accessKey,
-      protocol: updated.protocol,
-      rejectionCode: updated.rejectionCode,
-      rejectionReason: updated.rejectionReason,
-      issuedAt: updated.issuedAt,
-      closedAt: updated.closedAt,
-      canceledAt: updated.canceledAt,
-    };
+    await this.createMdfeEvent({
+      mdfeId: mdfe.id,
+      companyId,
+      type: 'CONSULT',
+      status: result.status === 'REJECTED' ? 'REJECTED' : 'AUTHORIZED',
+      result,
+    });
+
+    return this.toMdfeSummary(updated);
   }
 
   async close(tripId: string, companyId: string) {
@@ -201,6 +264,7 @@ export class MdfeService {
             fiscalSettings: true,
           },
         },
+        trip: true,
       },
     });
 
@@ -210,6 +274,12 @@ export class MdfeService {
 
     if (!mdfe.accessKey) {
       throw new BadRequestException('MDF-e ainda não possui chave de acesso.');
+    }
+
+    if (!mdfe.protocol) {
+      throw new BadRequestException(
+        'MDF-e ainda não possui protocolo de autorização.',
+      );
     }
 
     if (mdfe.status !== 'AUTHORIZED') {
@@ -224,25 +294,52 @@ export class MdfeService {
       throw new BadRequestException('Configuração fiscal não encontrada.');
     }
 
+    const closeState = mdfe.trip.destinationState || fiscal.state;
+    const closeCityIbgeCode =
+      mdfe.trip.destinationCityIbgeCode || fiscal.cityIbgeCode;
+
+    if (!closeState || !closeCityIbgeCode) {
+      throw new BadRequestException(
+        'UF e código IBGE do município de encerramento são obrigatórios.',
+      );
+    }
+
     const result = await this.mdfeProvider.close({
       accessKey: mdfe.accessKey,
-      state: fiscal.state,
-      cityIbgeCode: fiscal.cityIbgeCode,
+      protocol: mdfe.protocol,
+      state: closeState,
+      cityIbgeCode: closeCityIbgeCode,
       closedAt: new Date(),
     });
 
-    await this.prisma.mdfe.update({
+    const now = new Date();
+
+    const updated = await this.prisma.mdfe.update({
       where: { id: mdfe.id },
       data: {
-        status: this.mapProviderStatusToMdfeStatus(result.status),
+        status: result.status === 'CLOSED' ? 'CLOSED' : mdfe.status,
         responseXml: this.normalizeXml(result.responseXml ?? result.rawResponse),
         rejectionCode: result.rejectionCode ?? null,
         rejectionReason: result.rejectionReason ?? null,
-        closedAt: result.status === 'CLOSED' ? new Date() : mdfe.closedAt,
+        lastEventCode: result.rejectionCode ?? null,
+        lastEventReason: result.rejectionReason ?? null,
+        lastEventAt: now,
+        closedAt: result.status === 'CLOSED' ? now : mdfe.closedAt,
       },
     });
 
-    return result;
+    await this.createMdfeEvent({
+      mdfeId: mdfe.id,
+      companyId,
+      type: 'CLOSE',
+      status: result.status === 'CLOSED' ? 'AUTHORIZED' : 'REJECTED',
+      result,
+    });
+
+    return {
+      ...result,
+      mdfe: this.toMdfeSummary(updated),
+    };
   }
 
   async cancel(tripId: string, companyId: string, reason: string) {
@@ -260,6 +357,12 @@ export class MdfeService {
       throw new BadRequestException('MDF-e ainda não possui chave de acesso.');
     }
 
+    if (!mdfe.protocol) {
+      throw new BadRequestException(
+        'MDF-e ainda não possui protocolo de autorização.',
+      );
+    }
+
     if (mdfe.status !== 'AUTHORIZED') {
       throw new BadRequestException(
         'Somente MDF-e autorizado pode ser cancelado.',
@@ -268,21 +371,41 @@ export class MdfeService {
 
     const result = await this.mdfeProvider.cancel({
       accessKey: mdfe.accessKey,
+      protocol: mdfe.protocol,
       reason: normalizedReason,
     });
 
-    await this.prisma.mdfe.update({
+    const now = new Date();
+
+    const updated = await this.prisma.mdfe.update({
       where: { id: mdfe.id },
       data: {
-        status: this.mapProviderStatusToMdfeStatus(result.status),
+        status:
+          result.status === 'CANCELED'
+            ? 'CANCELED'
+            : this.mapProviderStatusToMdfeStatus(result.status),
         responseXml: this.normalizeXml(result.responseXml ?? result.rawResponse),
         rejectionCode: result.rejectionCode ?? null,
         rejectionReason: result.rejectionReason ?? null,
-        canceledAt: result.status === 'CANCELED' ? new Date() : mdfe.canceledAt,
+        lastEventCode: result.rejectionCode ?? null,
+        lastEventReason: result.rejectionReason ?? null,
+        lastEventAt: now,
+        canceledAt: result.status === 'CANCELED' ? now : mdfe.canceledAt,
       },
     });
 
-    return result;
+    await this.createMdfeEvent({
+      mdfeId: mdfe.id,
+      companyId,
+      type: 'CANCEL',
+      status: result.status === 'CANCELED' ? 'AUTHORIZED' : 'REJECTED',
+      result,
+    });
+
+    return {
+      ...result,
+      mdfe: this.toMdfeSummary(updated),
+    };
   }
 
   async getByTrip(tripId: string, companyId: string) {
@@ -337,6 +460,32 @@ export class MdfeService {
     return mdfe;
   }
 
+  private async createMdfeEvent(input: {
+    mdfeId: string;
+    companyId: string;
+    type: 'CLOSE' | 'CANCEL' | 'CONSULT';
+    status: 'SENT' | 'AUTHORIZED' | 'REJECTED' | 'ERROR';
+    result: MdfeIssueResult;
+  }) {
+    await this.prisma.mdfeEvent.create({
+      data: {
+        mdfeId: input.mdfeId,
+        companyId: input.companyId,
+        type: input.type,
+        status: input.status,
+        eventSequence: input.type === 'CONSULT' ? null : 1,
+        eventProtocol: input.result.protocol ?? null,
+        eventCode: input.result.rejectionCode ?? null,
+        eventReason: input.result.rejectionReason ?? null,
+        eventAt: input.result.authorizedAt ?? new Date(),
+        requestXml: input.result.requestXml ?? null,
+        responseXml: this.normalizeXml(
+          input.result.responseXml ?? input.result.rawResponse,
+        ),
+      },
+    });
+  }
+
   private mapProviderStatusToMdfeStatus(status: MdfeProviderStatus) {
     switch (status) {
       case 'AUTHORIZED':
@@ -369,5 +518,33 @@ export class MdfeService {
     } catch {
       return null;
     }
+  }
+
+  private toMdfeSummary(mdfe: {
+    id: string;
+    tripId: string;
+    status: string;
+    accessKey: string | null;
+    protocol: string | null;
+    rejectionCode: string | null;
+    rejectionReason: string | null;
+    issuedAt: Date | null;
+    authorizedAt?: Date | null;
+    closedAt: Date | null;
+    canceledAt: Date | null;
+  }) {
+    return {
+      id: mdfe.id,
+      tripId: mdfe.tripId,
+      status: mdfe.status,
+      accessKey: mdfe.accessKey,
+      protocol: mdfe.protocol,
+      rejectionCode: mdfe.rejectionCode,
+      rejectionReason: mdfe.rejectionReason,
+      issuedAt: mdfe.issuedAt,
+      authorizedAt: mdfe.authorizedAt ?? null,
+      closedAt: mdfe.closedAt,
+      canceledAt: mdfe.canceledAt,
+    };
   }
 }
