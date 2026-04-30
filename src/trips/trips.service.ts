@@ -129,57 +129,67 @@ export class TripsService {
     return trip;
   }
 
-  async update(id: string, dto: UpdateTripDto) {
-    const previous = await this.findOne(id);
+  async update(id: string, dto: UpdateTripDto, companyId: string) {
+  const trip = await this.prisma.trip.findFirst({
+    where: {
+      id,
+      companyId,
+    },
+  });
 
-    if (!dto || Object.keys(dto).length === 0) {
-      throw new BadRequestException('Envie dados para atualizar.');
-    }
-
-    if (dto.vehicleId) await this.ensureVehicleExists(dto.vehicleId);
-    if (dto.driverId) await this.ensureDriverExists(dto.driverId);
-
-    const updated = await this.prisma.trip.update({
-      where: { id },
-      data: {
-        ...(dto.origin !== undefined ? { origin: dto.origin } : {}),
-        ...(dto.destination !== undefined
-          ? { destination: dto.destination }
-          : {}),
-        ...(dto.reason !== undefined ? { reason: dto.reason || null } : {}),
-        ...(dto.departureKm !== undefined
-          ? { departureKm: Math.round(dto.departureKm) }
-          : {}),
-        ...(dto.returnKm !== undefined
-          ? { returnKm: Math.round(dto.returnKm) }
-          : {}),
-        ...(dto.departureAt !== undefined
-          ? { departureAt: new Date(dto.departureAt) }
-          : {}),
-        ...(dto.returnAt !== undefined
-          ? { returnAt: dto.returnAt ? new Date(dto.returnAt) : null }
-          : {}),
-        ...(dto.status !== undefined ? { status: dto.status } : {}),
-        ...(dto.notes !== undefined ? { notes: dto.notes || null } : {}),
-        ...(dto.vehicleId !== undefined ? { vehicleId: dto.vehicleId } : {}),
-        ...(dto.driverId !== undefined
-          ? { driverId: dto.driverId || null }
-          : {}),
-      },
-      include: this.includeDetailsRelations,
-    });
-
-    await this.updateVehicleKm(
-      updated.vehicleId,
-      updated.returnKm ?? updated.departureKm,
-    );
-
-    if (previous.vehicleId !== updated.vehicleId) {
-      await this.recalculateVehicleKm(previous.vehicleId);
-    }
-
-    return updated;
+  if (!trip) {
+    throw new NotFoundException("Viagem não encontrada.");
   }
+
+  // 🚫 NÃO DEIXA ALTERAR SE MDF-e AUTORIZADO
+  const mdfe = await this.prisma.mdfe.findFirst({
+    where: {
+      tripId: id,
+      status: "AUTHORIZED",
+    },
+  });
+
+  if (mdfe) {
+    throw new BadRequestException(
+      "Não é possível alterar a viagem após MDF-e autorizado.",
+    );
+  }
+
+  return this.prisma.trip.update({
+    where: { id },
+    data: {
+      origin: dto.origin ?? trip.origin,
+      destination: dto.destination ?? trip.destination,
+
+      originState: dto.originState,
+      originCityName: dto.originCityName,
+      originCityIbgeCode: dto.originCityIbgeCode,
+      originZipCode: dto.originZipCode,
+
+      destinationState: dto.destinationState,
+      destinationCityName: dto.destinationCityName,
+      destinationCityIbgeCode: dto.destinationCityIbgeCode,
+      destinationZipCode: dto.destinationZipCode,
+
+      cargoDescription: dto.cargoDescription,
+      cargoNcm: dto.cargoNcm,
+      cargoValue: dto.cargoValue,
+      cargoQuantity: dto.cargoQuantity,
+      cargoUnit: dto.cargoUnit,
+
+      paymentValue: dto.paymentValue,
+      paymentPixKey: dto.paymentPixKey,
+      paymentIndicator: dto.paymentIndicator,
+      contractorName: dto.contractorName,
+      contractorDocument: dto.contractorDocument,
+
+      insuranceCompanyName: dto.insuranceCompanyName,
+      insuranceCompanyDocument: dto.insuranceCompanyDocument,
+      insurancePolicyNumber: dto.insurancePolicyNumber,
+      insuranceEndorsement: dto.insuranceEndorsement,
+    },
+  });
+}
 
   async remove(id: string) {
     const trip = await this.findOne(id);

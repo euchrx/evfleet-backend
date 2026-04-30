@@ -36,8 +36,14 @@ export class TripsController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateTripDto) {
-    return this.tripsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateTripDto,
+    @Req() req: any,
+  ) {
+    const companyId = req?.companyScopeId || req?.user?.companyId;
+
+    return this.tripsService.update(id, dto, companyId);
   }
 
   @Post(':id/start')

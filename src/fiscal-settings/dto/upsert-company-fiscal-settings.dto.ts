@@ -1,23 +1,15 @@
-import {
-  IsDateString,
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  MaxLength,
-  Min,
-  MinLength,
-} from 'class-validator';
-import { FiscalEnvironment } from '@prisma/client';
+import { IsEnum, IsNumber, IsOptional, IsString } from "class-validator";
+
+export enum FiscalEnvironment {
+  HOMOLOGATION = "HOMOLOGATION",
+  PRODUCTION = "PRODUCTION",
+}
 
 export class UpsertCompanyFiscalSettingsDto {
   @IsString()
-  @MinLength(14)
-  @MaxLength(14)
   cnpj!: string;
 
   @IsString()
-  @MinLength(2)
   corporateName!: string;
 
   @IsOptional()
@@ -52,22 +44,35 @@ export class UpsertCompanyFiscalSettingsDto {
   cityIbgeCode!: string;
 
   @IsString()
-  @MaxLength(2)
   state!: string;
 
   @IsString()
   zipCode!: string;
 
+  @IsOptional()
+  @IsString()
+  rntrc?: string;
+
   @IsEnum(FiscalEnvironment)
   mdfeEnvironment!: FiscalEnvironment;
 
-  @IsInt()
-  @Min(1)
+  @IsNumber()
   mdfeSeries!: number;
 
-  @IsInt()
-  @Min(1)
+  @IsNumber()
   mdfeNextNumber!: number;
+
+  @IsOptional()
+  @IsString()
+  mdfeDefaultInsurerName?: string;
+
+  @IsOptional()
+  @IsString()
+  mdfeDefaultInsurerDocument?: string;
+
+  @IsOptional()
+  @IsString()
+  mdfeDefaultPolicyNumber?: string;
 
   @IsOptional()
   @IsString()
@@ -78,6 +83,6 @@ export class UpsertCompanyFiscalSettingsDto {
   certificatePasswordEncrypted?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsString()
   certificateExpiresAt?: string;
 }

@@ -1,63 +1,107 @@
 import {
-  IsDateString,
-  IsEnum,
-  IsNumber,
   IsOptional,
   IsString,
-  IsUUID,
-  Length,
-  Min,
-} from 'class-validator';
-import { TripStatusDto } from './create-trip.dto';
+  IsNumber,
+  IsEnum,
+} from "class-validator";
 
 export class UpdateTripDto {
   @IsOptional()
   @IsString()
-  @Length(2, 120)
   origin?: string;
 
   @IsOptional()
   @IsString()
-  @Length(2, 120)
   destination?: string;
 
   @IsOptional()
   @IsString()
-  @Length(2, 300)
-  reason?: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  departureKm?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  returnKm?: number;
-
-  @IsOptional()
-  @IsDateString()
-  departureAt?: string;
-
-  @IsOptional()
-  @IsDateString()
-  returnAt?: string;
-
-  @IsOptional()
-  @IsEnum(TripStatusDto)
-  status?: TripStatusDto;
+  originState?: string;
 
   @IsOptional()
   @IsString()
-  @Length(2, 500)
-  notes?: string;
+  originCityName?: string;
 
   @IsOptional()
-  @IsUUID()
-  vehicleId?: string;
+  @IsString()
+  originCityIbgeCode?: string;
 
   @IsOptional()
-  @IsUUID()
-  driverId?: string;
+  @IsString()
+  originZipCode?: string;
+
+  @IsOptional()
+  @IsString()
+  destinationState?: string;
+
+  @IsOptional()
+  @IsString()
+  destinationCityName?: string;
+
+  @IsOptional()
+  @IsString()
+  destinationCityIbgeCode?: string;
+
+  @IsOptional()
+  @IsString()
+  destinationZipCode?: string;
+
+  // CARGA
+  @IsOptional()
+  @IsString()
+  cargoDescription?: string;
+
+  @IsOptional()
+  @IsString()
+  cargoNcm?: string;
+
+  @IsOptional()
+  @IsNumber()
+  cargoValue?: number;
+
+  @IsOptional()
+  @IsNumber()
+  cargoQuantity?: number;
+
+  @IsOptional()
+  @IsString()
+  cargoUnit?: "KG" | "TON";
+
+  // PAGAMENTO
+  @IsOptional()
+  @IsNumber()
+  paymentValue?: number;
+
+  @IsOptional()
+  @IsString()
+  paymentPixKey?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentIndicator?: "PAID" | "UNPAID";
+
+  @IsOptional()
+  @IsString()
+  contractorName?: string;
+
+  @IsOptional()
+  @IsString()
+  contractorDocument?: string;
+
+  // SEGURO
+  @IsOptional()
+  @IsString()
+  insuranceCompanyName?: string;
+
+  @IsOptional()
+  @IsString()
+  insuranceCompanyDocument?: string;
+
+  @IsOptional()
+  @IsString()
+  insurancePolicyNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  insuranceEndorsement?: string;
 }

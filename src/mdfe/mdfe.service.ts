@@ -110,6 +110,8 @@ export class MdfeService {
         );
       }
 
+      this.validateBeforeIssue({ trip, fiscal });
+
       const nextNumber = fiscal.mdfeNextNumber;
 
       const mdfe = await tx.mdfe.upsert({
@@ -428,7 +430,34 @@ export class MdfeService {
   }
 
   async getDamdfeByTrip(tripId: string, companyId: string) {
-    const mdfe = await this.findMdfeByTripAndCompany(tripId, companyId);
+    const mdfe = await this.prisma.mdfe.findFirst({
+      where: {
+        tripId,
+        companyId,
+      },
+      include: {
+        company: {
+          include: {
+            fiscalSettings: true,
+          },
+        },
+        trip: {
+          include: {
+            vehicle: true,
+            driver: true,
+            products: {
+              include: {
+                dangerousProduct: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!mdfe) {
+      throw new NotFoundException('MDF-e não encontrado para esta viagem.');
+    }
 
     const buffer = await this.damdfeService.buildPdf({
       accessKey: mdfe.accessKey,
@@ -437,6 +466,23 @@ export class MdfeService {
       series: mdfe.series,
       number: mdfe.number,
       issuedAt: mdfe.issuedAt,
+      companyName:
+        mdfe.company.fiscalSettings?.corporateName || mdfe.company.name,
+      companyDocument: mdfe.company.fiscalSettings?.cnpj || mdfe.company.document,
+      vehiclePlate: mdfe.trip.vehicle?.plate,
+      driverName: mdfe.trip.driver?.name,
+      origin: mdfe.trip.origin,
+      destination: mdfe.trip.destination,
+      cargoDescription:
+        mdfe.trip.cargoDescription ||
+        mdfe.trip.products?.[0]?.dangerousProduct?.name ||
+        'Carga transportada',
+      cargoValue: mdfe.trip.cargoValue
+        ? Number(mdfe.trip.cargoValue)
+        : null,
+      cargoQuantity: mdfe.trip.cargoQuantity
+        ? Number(mdfe.trip.cargoQuantity)
+        : null,
     });
 
     return {
@@ -501,6 +547,93 @@ export class MdfeService {
       case 'ERROR':
       default:
         return 'ERROR';
+    }
+  }
+
+  private validateBeforeIssue(input: {
+    trip: any;
+    fiscal: any;
+  }) {
+    const { trip, fiscal } = input;
+    const errors: string[] = [];
+
+    if (!fiscal.cnpj) {
+      errors.push('CNPJ do emitente não informado.');
+    }
+
+    if (!fiscal.stateRegistration) {
+      errors.push('Inscrição estadual do emitente não informada.');
+    }
+
+    if (!fiscal.state) {
+      errors.push('UF do emitente não informada.');
+    }
+
+    if (!fiscal.cityIbgeCode) {
+      errors.push('Código IBGE do município do emitente não informado.');
+    }
+
+    if (!fiscal.rntrc) {
+      errors.push('RNTRC não informado nas configurações fiscais.');
+    }
+
+    if (!trip.vehicleId) {
+      errors.push('Veículo de tração não vinculado à viagem.');
+    }
+
+    if (!trip.driverId) {
+      errors.push('Motorista não vinculado à viagem.');
+    }
+
+    if (!trip.originState) {
+      errors.push('UF de origem da viagem não informada.');
+    }
+
+    if (!trip.destinationState) {
+      errors.push('UF de destino da viagem não informada.');
+    }
+
+    if (!trip.originCityIbgeCode) {
+      errors.push('Código IBGE da cidade de origem não informado.');
+    }
+
+    if (!trip.destinationCityIbgeCode) {
+      errors.push('Código IBGE da cidade de destino não informado.');
+    }
+
+    if (!trip.cargoNcm) {
+      errors.push('NCM do produto predominante não informado.');
+    }
+
+    if (!trip.cargoValue || Number(trip.cargoValue) <= 0) {
+      errors.push('Valor da carga não informado ou inválido.');
+    }
+
+    if (!trip.cargoQuantity || Number(trip.cargoQuantity) <= 0) {
+      errors.push('Quantidade da carga não informada ou inválida.');
+    }
+
+    if (!trip.paymentValue || Number(trip.paymentValue) <= 0) {
+      errors.push('Valor do pagamento/frete não informado.');
+    }
+
+    if (!trip.insuranceCompanyName) {
+      errors.push('Nome da seguradora não informado.');
+    }
+
+    if (!trip.insuranceCompanyDocument) {
+      errors.push('CNPJ/CPF da seguradora não informado.');
+    }
+
+    if (!trip.insurancePolicyNumber) {
+      errors.push('Número da apólice de seguro não informado.');
+    }
+
+    if (errors.length > 0) {
+      throw new BadRequestException({
+        message: 'Viagem com dados fiscais incompletos para emissão do MDF-e.',
+        errors,
+      });
     }
   }
 

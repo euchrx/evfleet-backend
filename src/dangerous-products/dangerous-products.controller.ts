@@ -1,96 +1,72 @@
 import {
-  Body,
   Controller,
-  Delete,
-  ForbiddenException,
   Get,
-  Param,
-  Patch,
   Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
   Req,
-  UseGuards,
-} from '@nestjs/common';
-import type { Request } from 'express';
-import { DangerousProductsService } from './dangerous-products.service';
-import { CreateDangerousProductDto } from './dto/create-dangerous-product.dto';
-import { UpdateDangerousProductDto } from './dto/update-dangerous-product.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+  BadRequestException,
+} from "@nestjs/common";
+import { DangerousProductsService } from "./dangerous-products.service";
+import { CreateDangerousProductDto } from "./dto/create-dangerous-product.dto";
+import { UpdateDangerousProductDto } from "./dto/update-dangerous-product.dto";
 
-type RequestWithUser = Request & {
-  user?: {
-    userId?: string;
-    sub?: string;
-    email?: string;
-    role?: string;
-    companyId?: string | null;
-  };
-};
-
-@Controller('dangerous-products')
-@UseGuards(JwtAuthGuard)
+@Controller("dangerous-products")
 export class DangerousProductsController {
-  constructor(
-    private readonly dangerousProductsService: DangerousProductsService,
-  ) {}
+  constructor(private readonly service: DangerousProductsService) {}
 
-  private getCompanyId(req: RequestWithUser): string {
-    const companyId = req.user?.companyId;
+  private getCompanyId(req: any): string {
+    const companyId = req.headers["x-company-scope"];
 
     if (!companyId) {
-      throw new ForbiddenException('Empresa não identificada no token.');
+      throw new BadRequestException("Empresa não selecionada");
     }
 
     return companyId;
   }
 
-  @Post()
-  create(@Req() req: RequestWithUser, @Body() dto: CreateDangerousProductDto) {
-    return this.dangerousProductsService.create(
-      { companyId: this.getCompanyId(req) },
-      dto,
-    );
-  }
-
   @Get()
-  findAll(@Req() req: RequestWithUser) {
-    return this.dangerousProductsService.findAll({
-      companyId: this.getCompanyId(req),
-    });
+  async findAll(@Req() req: any) {
+    const companyId = this.getCompanyId(req);
+    return this.service.findAll(companyId);
   }
 
-  @Get('active')
-  findActive(@Req() req: RequestWithUser) {
-    return this.dangerousProductsService.findActive({
-      companyId: this.getCompanyId(req),
-    });
+  @Get("active")
+  async findActive(@Req() req: any) {
+    const companyId = this.getCompanyId(req);
+    return this.service.findActive(companyId);
   }
 
-  @Get(':id')
-  findOne(@Req() req: RequestWithUser, @Param('id') id: string) {
-    return this.dangerousProductsService.findOne(
-      { companyId: this.getCompanyId(req) },
-      id,
-    );
+  @Get(":id")
+  async findOne(@Param("id") id: string, @Req() req: any) {
+    const companyId = this.getCompanyId(req);
+    return this.service.findOne(id, companyId);
   }
 
-  @Patch(':id')
-  update(
-    @Req() req: RequestWithUser,
-    @Param('id') id: string,
+  @Post()
+  async create(
+    @Req() req: any,
+    @Body() dto: CreateDangerousProductDto,
+  ) {
+    const companyId = this.getCompanyId(req);
+    return this.service.create(companyId, dto);
+  }
+
+  @Patch(":id")
+  async update(
+    @Param("id") id: string,
+    @Req() req: any,
     @Body() dto: UpdateDangerousProductDto,
   ) {
-    return this.dangerousProductsService.update(
-      { companyId: this.getCompanyId(req) },
-      id,
-      dto,
-    );
+    const companyId = this.getCompanyId(req);
+    return this.service.update(id, companyId, dto);
   }
 
-  @Delete(':id')
-  remove(@Req() req: RequestWithUser, @Param('id') id: string) {
-    return this.dangerousProductsService.remove(
-      { companyId: this.getCompanyId(req) },
-      id,
-    );
+  @Delete(":id")
+  async remove(@Param("id") id: string, @Req() req: any) {
+    const companyId = this.getCompanyId(req);
+    return this.service.remove(id, companyId);
   }
 }
